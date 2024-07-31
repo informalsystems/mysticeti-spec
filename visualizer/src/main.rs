@@ -34,7 +34,7 @@ type ProposerSlot = (BigInt, BigInt);
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "tag", content = "value")]
 pub enum ProposerSlotState {
-    Commit(ProposerSlot),
+    Commit(StatementBlock),
     Skip(ProposerSlot),
     Undecided,
 }

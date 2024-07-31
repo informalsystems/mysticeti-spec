@@ -7,7 +7,7 @@ module mysticeti_c {
   type Round = int
 
   type ProposerSlot = (Validator, Round) // option?
-  type ProposerSlotState = Commit(ProposerSlot) | Skip(ProposerSlot) | Undecided
+  type ProposerSlotState = Commit(StatementBlock) | Skip(ProposerSlot) | Undecided
 
   type BlockReference = { authority: int, round: Round, label: str }
   type StatementBlock = { reference: BlockReference, includes: Set[BlockReference] }
@@ -163,6 +163,20 @@ module mysticeti_c {
     }
   }
 
+  pure def certified_link(d: DirectDecider, b_anchor: StatementBlock, b_proposer: StatementBlock): bool = {
+    pure val w = d.wave_number(b_proposer.reference.round)
+    pure val blocks = d.get_decision_blocks(w)
+    blocks.exists(block => d.is_cert(block, b_proposer) and d.block_store.link(block, b_anchor))
+  }
+
+  pure def slot_round(s: ProposerSlotState): Round = {
+    match s {
+      | Commit(b) => b.reference.round
+      | Skip(t) => t._1 // I can't tell if this is case is right from the pseudocode
+      | Undecided => 0
+    }
+  }
+
   pure def try_direct_decide(d: DirectDecider, w: int): ProposerSlotState = {
     if (d.skipped_proposer(w)) {
       Skip((d.proposer_offset, d.proposer_round(w)))
@@ -170,14 +184,42 @@ module mysticeti_c {
       pure val b_proposer = d.supported_proposer(w)
       match b_proposer {
         | None => Undecided
-        | Some(proposed_block) => Commit((proposed_block.reference.authority, proposed_block.reference.round))
+        | Some(proposed_block) => Commit(proposed_block)
       }
     }
   }
 
-  pure def try_indirect_decide(d: DirectDecider, w: int): ProposerSlotState = {
-    // TODO
-    Undecided
+  pure def try_indirect_decide(d: DirectDecider, w: int, sequence: List[ProposerSlotState]): ProposerSlotState = {
+    pure val r_decision = d.decision_round(w)
+    pure val anchors = sequence.select(s => r_decision < slot_round(s))
+    pure val result = anchors.foldl(None, (res, a) => {
+      if (res != None) {
+        res
+      } else {
+        match a {
+          | Undecided => Some(Undecided)
+          | Commit(b_anchor) => {
+            pure val b_proposer = d.get_proposer_block(w)
+            match b_proposer {
+              | None => res
+              | Some(block) => {
+                  if (d.certified_link(b_anchor, block)) {
+                    Some(Commit(block))
+                  } else {
+                    Some(Skip((block.reference.authority, block.reference.round)))
+                  }
+              }
+            }
+          }
+          | Skip(_) => res
+        }
+      }
+    })
+
+    match result {
+      | None => Undecided
+      | Some(s) => q::debug("indirect decide of:", s)
+    }
   }
 
   pure def try_decide(block_store, previous_result, r) = {
@@ -193,7 +235,7 @@ module mysticeti_c {
         } else {
           pure val direct_status = q::debug("try direct decide", c.try_direct_decide(w))
           pure val status = if (direct_status == Undecided) {
-            c.try_indirect_decide(w)
+            c.try_indirect_decide(w, sequence)
           } else {
             direct_status
           }
@@ -240,7 +282,7 @@ module mysticeti_c {
   pure def find_state(result: List[ProposerSlotState], block: BlockReference): ProposerSlotState = {
     result.foldl(Undecided, (state, res) => {
       match res {
-      | Commit(t) => if (t == (block.authority, block.round)) Commit(t) else state
+      | Commit(b) => if (b.reference == block) Commit(b) else state
       | Skip(t) => if (t == (block.authority, block.round)) Skip(t) else state
       | _ => state
       }
