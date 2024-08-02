@@ -8,6 +8,7 @@ module mysticeti_c {
 
   type ProposerSlot = (Validator, Round) // option?
   type ProposerSlotState = Commit(StatementBlock) | Skip(ProposerSlot) | Undecided
+  type StateWithRound = { status: ProposerSlotState, round: Round }
 
   type BlockReference = { authority: int, round: Round, label: str }
   type StatementBlock = { reference: BlockReference, includes: Set[BlockReference] }
@@ -22,28 +23,28 @@ module mysticeti_c {
   pure val NUM_OF_PROPOSERS = 4
   pure val FAULTY = 1
 
-  pure val L1a = { authority: 0, round: 1, label: "L1a" }
-  pure val L1b = { authority: 1, round: 1, label: "L1b" }
-  pure val L1c = { authority: 2, round: 1, label: "L1c" }
-  pure val L1d = { authority: 3, round: 1, label: "L1d" }
-  pure val L2a = { authority: 0, round: 2, label: "L2a" }
-  pure val L2b = { authority: 1, round: 2, label: "L2b" }
-  pure val L2c = { authority: 2, round: 2, label: "L2c" }
-  pure val L2d = { authority: 3, round: 2, label: "L2d" }
-  pure val L3c = { authority: 0, round: 3, label: "L3c" }
-  pure val L3d = { authority: 1, round: 3, label: "L3d" }
-  pure val L3b = { authority: 3, round: 3, label: "L3b" }
-  pure val L4d = { authority: 0, round: 4, label: "L4d" }
-  pure val L4a = { authority: 1, round: 4, label: "L4a" }
-  pure val L4b = { authority: 2, round: 4, label: "L4b" }
-  pure val L4c = { authority: 3, round: 4, label: "L4c" }
-  pure val L5c = { authority: 0, round: 5, label: "L5c" }
-  pure val L5d = { authority: 1, round: 5, label: "L5d" }
-  pure val L5a = { authority: 2, round: 5, label: "L5a" }
-  pure val L5b = { authority: 3, round: 5, label: "L5b" }
-  pure val L6b = { authority: 0, round: 6, label: "L6b" }
-  pure val L6c = { authority: 1, round: 6, label: "L6c" }
-  pure val L6d = { authority: 2, round: 6, label: "L6d" }
+  pure val L1a = { authority: 0, round: 0, label: "L1a" }
+  pure val L1b = { authority: 1, round: 0, label: "L1b" }
+  pure val L1c = { authority: 2, round: 0, label: "L1c" }
+  pure val L1d = { authority: 3, round: 0, label: "L1d" }
+  pure val L2d = { authority: 0, round: 1, label: "L2d" }
+  pure val L2a = { authority: 1, round: 1, label: "L2a" }
+  pure val L2b = { authority: 2, round: 1, label: "L2b" }
+  pure val L2c = { authority: 3, round: 1, label: "L2c" }
+  pure val L3c = { authority: 0, round: 2, label: "L3c" }
+  pure val L3d = { authority: 1, round: 2, label: "L3d" }
+  pure val L3b = { authority: 3, round: 2, label: "L3b" }
+  pure val L4d = { authority: 0, round: 3, label: "L4d" }
+  pure val L4a = { authority: 1, round: 3, label: "L4a" }
+  pure val L4b = { authority: 2, round: 3, label: "L4b" }
+  pure val L4c = { authority: 3, round: 3, label: "L4c" }
+  pure val L5c = { authority: 0, round: 4, label: "L5c" }
+  pure val L5d = { authority: 1, round: 4, label: "L5d" }
+  pure val L5a = { authority: 2, round: 4, label: "L5a" }
+  pure val L5b = { authority: 3, round: 4, label: "L5b" }
+  pure val L6b = { authority: 0, round: 5, label: "L6b" }
+  pure val L6c = { authority: 1, round: 5, label: "L6c" }
+  pure val L6d = { authority: 2, round: 5, label: "L6d" }
 
   pure val DAG = Set(
     { reference: L1a, includes: Set() },
@@ -97,7 +98,7 @@ module mysticeti_c {
   }
 
   pure def decision_round(d: DirectDecider, w: int): int = {
-    w * d.wave_length + d.wave_length - 1 + d.round_offset
+    w * d.wave_length + d.wave_length - 1 + d.round_offset - 1
   }
 
   // FIXME: I don't understand what this should be from the paper
@@ -119,7 +120,7 @@ module mysticeti_c {
 
   pure def get_decision_blocks(d: DirectDecider, w: int): Set[StatementBlock] = {
     pure val r_decision = d.decision_round(w)
-    d.block_store.blocks_by_round.get(r_decision - 1)
+    d.block_store.blocks_by_round.get(r_decision)
   }
 
   pure def is_vote(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
@@ -134,7 +135,14 @@ module mysticeti_c {
   }
 
   pure def is_cert(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
-    d.block_store.parents(block).filter(b => d.is_vote(b, proposer_block)).size() >= 2*FAULTY + 1
+    // FIXME: this should be on is_vote actually
+    pure val block_parents = block.reference.round.to(proposer_block.reference.round).fold(([block], [block]), (blocks_tuple, r) => {
+      pure val blocks = blocks_tuple._1
+      pure val last_parents = blocks_tuple._1
+      pure val new_parents = last_parents.foldl([], (list, b) => (d.block_store.parents(b)).fold(list, (acc, p) => list.append(p)))
+      (blocks.concat(new_parents), new_parents)
+    })._1
+    block_parents.select(b => d.is_vote(b, proposer_block)).length() >= 2*FAULTY + 1
   }
 
   pure def skipped_proposer(d: DirectDecider, w: int): bool = {
@@ -152,8 +160,8 @@ module mysticeti_c {
     match b_proposer {
       | None => None
       | Some(proposed_block) => {
-        pure val blocks = q::debug("blocks", d.get_decision_blocks(w))
-        pure val supporters = q::debug("supporters", blocks.filter(block => d.is_vote(block, proposed_block)))
+        pure val blocks = d.get_decision_blocks(w)
+        pure val supporters = blocks.filter(block => d.is_vote(block, proposed_block))
         if (supporters.size() >= 2*FAULTY + 1) {
           Some(proposed_block)
         } else {
@@ -172,7 +180,7 @@ module mysticeti_c {
   pure def slot_round(s: ProposerSlotState): Round = {
     match s {
       | Commit(b) => b.reference.round
-      | Skip(t) => t._1 // I can't tell if this is case is right from the pseudocode
+      | Skip(t) => t._2 // I can't tell if this is case is right from the pseudocode
       | Undecided => 0
     }
   }
@@ -189,14 +197,15 @@ module mysticeti_c {
     }
   }
 
-  pure def try_indirect_decide(d: DirectDecider, w: int, sequence: List[ProposerSlotState]): ProposerSlotState = {
-    pure val r_decision = d.decision_round(w)
-    pure val anchors = sequence.select(s => r_decision < slot_round(s))
+  pure def try_indirect_decide(d: DirectDecider, w: int, sequence: List[StateWithRound]): ProposerSlotState = {
+    pure val r_decision = q::debug("r_decision", d.decision_round(w))
+    pure val r_plus_two = q::debug("r + 2", d.proposer_round(w) + 2)
+    pure val anchors = q::debug("anchors", sequence.select(s => r_plus_two < s.round))
     pure val result = anchors.foldl(None, (res, a) => {
       if (res != None) {
         res
       } else {
-        match a {
+        match a.status {
           | Undecided => Some(Undecided)
           | Commit(b_anchor) => {
             pure val b_proposer = d.get_proposer_block(w)
@@ -218,70 +227,76 @@ module mysticeti_c {
 
     match result {
       | None => Undecided
-      | Some(s) => q::debug("indirect decide of:", s)
+      | Some(s) => s
     }
   }
 
-  pure def try_decide(block_store, previous_result, r) = {
+  pure def try_decide(block_store, sequence, r, l) = {
     pure val status_sequence = if (r > block_store.highest_round - 2) {
-      previous_result
+      ([{ status: Undecided, round: r }].concat(sequence))
     } else {
-      decreasing_range(NUM_OF_PROPOSERS - 1, 0).foldl(previous_result, (sequence, l) => {
-        pure val i = r % WAVE_LENGTH
-        pure val c = direct_decider(block_store, WAVE_LENGTH, i, l)
-        pure val w = c.wave_number(r)
-        if (c.proposer_round(w) != r) {
-           q::debug("wrong round", sequence)
+      pure val i = r % WAVE_LENGTH
+      pure val c = direct_decider(block_store, WAVE_LENGTH, i, l)
+      pure val w = c.wave_number(r)
+      if (c.proposer_round(w) != r) {
+         sequence
+      } else {
+        pure val direct_status = q::debug("try direct decide", c.try_direct_decide(w))
+        pure val status = if (direct_status == Undecided) {
+          q::debug("try indirect decide", c.try_indirect_decide(w, sequence))
         } else {
-          pure val direct_status = q::debug("try direct decide", c.try_direct_decide(w))
-          pure val status = if (direct_status == Undecided) {
-            c.try_indirect_decide(w, sequence)
-          } else {
-            direct_status
-          }
-          ([status].concat(sequence))
+          direct_status
         }
-      })
+        ([{ status: status, round: r }].concat(sequence))
+      }
    }
 
-    pure val result = status_sequence.foldl(([], false), (acc, status) => {
-      // TODO: write a take while spell or something
-      if (status == Undecided or acc._2) {
-        (acc._1, true)
-      } else {
-        ((acc._1).append(status), false)
-      }
-    })
+   status_sequence
+    // if (l == 0) {
+    //   pure val result = status_sequence.foldl(([], false), (acc, status) => {
+    //     // TODO: write a take while spell or something
+    //     if (status.status == Undecided or acc._2) {
+    //       (acc._1, true)
+    //     } else {
+    //       ((acc._1).append(status), false)
+    //     }
+    //   })
 
-    result._1
+    //   result._1
+    // } else {
+    //   status_sequence
+    // }
   }
 
   type BlockWithState = { block: StatementBlock, state: ProposerSlotState }
   var dag: Set[BlockWithState]
-  var result: List[ProposerSlotState]
+  var result: List[StateWithRound]
   var round_to_process: int
+  var validator_to_process: int
 
   action init = all {
     dag' = DAG.map(block => { block: block, state: Undecided }),
     result' = [],
-    round_to_process' = 6,
+    round_to_process' = 5,
+    validator_to_process' = NUM_OF_PROPOSERS - 1
   }
 
   action step =
-    val block_store = { blocks_by_round: 0.to(8).mapBy(round => DAG.filter(b => b.reference.round == round)), highest_round: 6 }
-    val new_result = try_decide(block_store, result, round_to_process)
+    val block_store = { blocks_by_round: 0.to(7).mapBy(round => DAG.filter(b => b.reference.round == round)), highest_round: 5 }
+    val new_result = q::debug("statuses", try_decide(block_store, result, round_to_process, validator_to_process))
     all {
       round_to_process >= 0,
       dag' = DAG.map(block => { block: block, state: find_state(new_result, block.reference) }),
       result' = new_result,
-      round_to_process' = round_to_process - 1,
+      round_to_process' = if (validator_to_process == 0) round_to_process - 1 else round_to_process,
+      validator_to_process' = if (validator_to_process == 0) NUM_OF_PROPOSERS - 1 else validator_to_process - 1,
     }
 
   val inv = result == []
 
-  pure def find_state(result: List[ProposerSlotState], block: BlockReference): ProposerSlotState = {
+  pure def find_state(result: List[StateWithRound], block: BlockReference): ProposerSlotState = {
     result.foldl(Undecided, (state, res) => {
-      match res {
+      match res.status {
       | Commit(b) => if (b.reference == block) Commit(b) else state
       | Skip(t) => if (t == (block.authority, block.round)) Skip(t) else state
       | _ => state
