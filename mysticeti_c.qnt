@@ -6,9 +6,10 @@ module mysticeti_c {
   type Validator = int
   type Round = int
 
-  type ProposerSlot = (Validator, Round) // option?
+  type ProposerSlot = (Validator, Round)
   type ProposerSlotState = Commit(StatementBlock) | Skip(ProposerSlot) | Undecided
-  type StateWithRound = { status: ProposerSlotState, round: Round }
+  type Decision = { status: ProposerSlotState, round: Round, authority: Validator }
+  type BlockWithState = { block: StatementBlock, state: ProposerSlotState }
 
   type BlockReference = { authority: int, round: Round, label: str }
   type StatementBlock = { reference: BlockReference, includes: Set[BlockReference] }
@@ -197,22 +198,26 @@ module mysticeti_c {
     }
   }
 
-  pure def try_indirect_decide(d: DirectDecider, w: int, sequence: List[StateWithRound]): ProposerSlotState = {
-    pure val r_decision = q::debug("r_decision", d.decision_round(w))
-    pure val r_plus_two = q::debug("r + 2", d.proposer_round(w) + 2)
-    pure val anchors = q::debug("anchors", sequence.select(s => r_plus_two < s.round))
+  pure def try_indirect_decide(d: DirectDecider, w: int, sequence: List[Decision]): ProposerSlotState = {
+    // The paper uses the decision round in the pseudocode, but the text always mentions r' > r + 2.
+    // I couldn't make it work it the decision round, but r' > r + 2 works.
+    pure val r_proposer = d.proposer_round(w)
+    pure val anchors = sequence.select(s => s.round > r_proposer + 2)
+
+    // FIXME: define and use a `first` operator?
+    // FIXME: The orther of anchors depends on the rank of the leaders
     pure val result = anchors.foldl(None, (res, a) => {
       if (res != None) {
         res
       } else {
-        match a.status {
+        match q::debug("potential anchor", a).status {
           | Undecided => Some(Undecided)
           | Commit(b_anchor) => {
             pure val b_proposer = d.get_proposer_block(w)
             match b_proposer {
               | None => res
               | Some(block) => {
-                  if (d.certified_link(b_anchor, block)) {
+                  if (d.certified_link(q::debug("anchor", b_anchor), block)) {
                     Some(Commit(block))
                   } else {
                     Some(Skip((block.reference.authority, block.reference.round)))
@@ -232,8 +237,8 @@ module mysticeti_c {
   }
 
   pure def try_decide(block_store, sequence, r, l) = {
-    pure val status_sequence = if (r > block_store.highest_round - 2) {
-      ([{ status: Undecided, round: r }].concat(sequence))
+    if (r > block_store.highest_round - 2) {
+      ([{ status: Undecided, round: r, authority: l }].concat(sequence))
     } else {
       pure val i = r % WAVE_LENGTH
       pure val c = direct_decider(block_store, WAVE_LENGTH, i, l)
@@ -247,11 +252,11 @@ module mysticeti_c {
         } else {
           direct_status
         }
-        ([{ status: status, round: r }].concat(sequence))
+        ([{ status: status, round: r, authority: l }].concat(sequence))
       }
    }
 
-   status_sequence
+    // FIXME: Move this to step so it is only done after all iterations of try_decide
     // if (l == 0) {
     //   pure val result = status_sequence.foldl(([], false), (acc, status) => {
     //     // TODO: write a take while spell or something
@@ -268,9 +273,8 @@ module mysticeti_c {
     // }
   }
 
-  type BlockWithState = { block: StatementBlock, state: ProposerSlotState }
   var dag: Set[BlockWithState]
-  var result: List[StateWithRound]
+  var result: List[Decision]
   var round_to_process: int
   var validator_to_process: int
 
@@ -283,7 +287,7 @@ module mysticeti_c {
 
   action step =
     val block_store = { blocks_by_round: 0.to(7).mapBy(round => DAG.filter(b => b.reference.round == round)), highest_round: 5 }
-    val new_result = q::debug("statuses", try_decide(block_store, result, round_to_process, validator_to_process))
+    val new_result = try_decide(block_store, result, round_to_process, validator_to_process)
     all {
       round_to_process >= 0,
       dag' = DAG.map(block => { block: block, state: find_state(new_result, block.reference) }),
@@ -292,21 +296,13 @@ module mysticeti_c {
       validator_to_process' = if (validator_to_process == 0) NUM_OF_PROPOSERS - 1 else validator_to_process - 1,
     }
 
-  val inv = result == []
-
-  pure def find_state(result: List[StateWithRound], block: BlockReference): ProposerSlotState = {
+  pure def find_state(result: List[Decision], block: BlockReference): ProposerSlotState = {
     result.foldl(Undecided, (state, res) => {
       match res.status {
       | Commit(b) => if (b.reference == block) Commit(b) else state
       | Skip(t) => if (t == (block.authority, block.round)) Skip(t) else state
       | _ => state
       }
-    })
-  }
-
-  pure def decreasing_range(start: int, end: int): List[int] = {
-    range(end, start + 1).foldl([], (acc, i) => {
-      List(i).concat(acc)
     })
   }
 }
