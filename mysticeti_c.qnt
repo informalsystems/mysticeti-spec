@@ -2,6 +2,7 @@
 
 module mysticeti_c {
   import basicSpells.* from "./spells/basicSpells"
+  import rareSpells.* from "./spells/rareSpells"
 
   type Validator = int
   type Round = int
@@ -125,25 +126,35 @@ module mysticeti_c {
   }
 
   pure def is_vote(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
-    // FIXME: there is something related to ordering here, because we should only certify the first round.
-    // perhaps the includes attribute needs to be a list. I'll use link for now because without the order factor, I think this may be the same
-    // d.block_store.link(proposer_block, block)
-    block.includes.contains(proposer_block.reference)
-    // d.block_store.highest_round.to(proposer_block.reference.round).fold(None, (result, round) => {
-    //   d.block_store.blocks_by_round.get(round).find(b => b.includes.contains(proposer_block.reference))
-    // })
-    // block.includes.contains(proposer_block.reference)
+    pure val block_parents = block.reference.round.to(proposer_block.reference.round).fold(([{ block: block, rank: 0 }], [{ block: block, rank: 0 }], 0), (blocks_tuple, r) => {
+      pure val blocks = blocks_tuple._1
+      pure val last_parents = blocks_tuple._2
+      pure val rank = blocks_tuple._3
+      // TODO: do the parents have a specific order?
+      pure val new_parents = last_parents.foldl([], (list, b) => (d.block_store.parents(b.block)).fold(list, (acc, p) => list.append({ block: p, rank: rank })))
+      (blocks.concat(new_parents), new_parents, rank + 1)
+    })._1.toSet().toList((a, b) => intCompare(a.rank, b.rank))
+    pure val supporter_block = q::debug("dfs", block_parents).foldl(None, (res, b1) =>
+      if (res != None) {
+        res
+      } else {
+        pure val b = b1.block
+        if ((b.reference.authority, b.reference.round) == (proposer_block.reference.authority, proposer_block.reference.round)) {
+          Some(b)
+        } else {
+          None
+        }
+      }
+    )
+
+    match supporter_block {
+      | Some(b) => b == proposer_block
+      | None => false
+    }
   }
 
   pure def is_cert(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
-    // FIXME: this should be on is_vote actually
-    pure val block_parents = block.reference.round.to(proposer_block.reference.round).fold(([block], [block]), (blocks_tuple, r) => {
-      pure val blocks = blocks_tuple._1
-      pure val last_parents = blocks_tuple._1
-      pure val new_parents = last_parents.foldl([], (list, b) => (d.block_store.parents(b)).fold(list, (acc, p) => list.append(p)))
-      (blocks.concat(new_parents), new_parents)
-    })._1
-    block_parents.select(b => d.is_vote(b, proposer_block)).length() >= 2*FAULTY + 1
+    d.block_store.parents(block).filter(b => d.is_vote(b, proposer_block)).size() >= 2*FAULTY + 1
   }
 
   pure def skipped_proposer(d: DirectDecider, w: int): bool = {
