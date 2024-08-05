@@ -2,7 +2,6 @@
 
 module mysticeti_c {
   import basicSpells.* from "./spells/basicSpells"
-  import rareSpells.* from "./spells/rareSpells"
 
   type Validator = int
   type Round = int
@@ -126,31 +125,10 @@ module mysticeti_c {
   }
 
   pure def is_vote(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
-    pure val block_parents = block.reference.round.to(proposer_block.reference.round).fold(([{ block: block, rank: 0 }], [{ block: block, rank: 0 }], 0), (blocks_tuple, r) => {
-      pure val blocks = blocks_tuple._1
-      pure val last_parents = blocks_tuple._2
-      pure val rank = blocks_tuple._3
-      // TODO: do the parents have a specific order?
-      pure val new_parents = last_parents.foldl([], (list, b) => (d.block_store.parents(b.block)).fold(list, (acc, p) => list.append({ block: p, rank: rank })))
-      (blocks.concat(new_parents), new_parents, rank + 1)
-    })._1.toSet().toList((a, b) => intCompare(a.rank, b.rank))
-    pure val supporter_block = q::debug("dfs", block_parents).foldl(None, (res, b1) =>
-      if (res != None) {
-        res
-      } else {
-        pure val b = b1.block
-        if ((b.reference.authority, b.reference.round) == (proposer_block.reference.authority, proposer_block.reference.round)) {
-          Some(b)
-        } else {
-          None
-        }
-      }
-    )
-
-    match supporter_block {
-      | Some(b) => b == proposer_block
-      | None => false
-    }
+    // The paper describes this as a DFS search starting from block, but from
+    // the overall explanation, I can't understand why it is not simply a check
+    // for the existence of a link between the blocks
+    d.block_store.link(block, proposer_block)
   }
 
   pure def is_cert(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
