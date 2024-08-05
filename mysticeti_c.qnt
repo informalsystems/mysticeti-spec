@@ -125,25 +125,14 @@ module mysticeti_c {
   }
 
   pure def is_vote(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
-    // FIXME: there is something related to ordering here, because we should only certify the first round.
-    // perhaps the includes attribute needs to be a list. I'll use link for now because without the order factor, I think this may be the same
-    // d.block_store.link(proposer_block, block)
-    block.includes.contains(proposer_block.reference)
-    // d.block_store.highest_round.to(proposer_block.reference.round).fold(None, (result, round) => {
-    //   d.block_store.blocks_by_round.get(round).find(b => b.includes.contains(proposer_block.reference))
-    // })
-    // block.includes.contains(proposer_block.reference)
+    // The paper describes this as a DFS search starting from block, but from
+    // the overall explanation, I can't understand why it is not simply a check
+    // for the existence of a link between the blocks
+    d.block_store.link(block, proposer_block)
   }
 
   pure def is_cert(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
-    // FIXME: this should be on is_vote actually
-    pure val block_parents = block.reference.round.to(proposer_block.reference.round).fold(([block], [block]), (blocks_tuple, r) => {
-      pure val blocks = blocks_tuple._1
-      pure val last_parents = blocks_tuple._1
-      pure val new_parents = last_parents.foldl([], (list, b) => (d.block_store.parents(b)).fold(list, (acc, p) => list.append(p)))
-      (blocks.concat(new_parents), new_parents)
-    })._1
-    block_parents.select(b => d.is_vote(b, proposer_block)).length() >= 2*FAULTY + 1
+    d.block_store.parents(block).filter(b => d.is_vote(b, proposer_block)).size() >= 2*FAULTY + 1
   }
 
   pure def skipped_proposer(d: DirectDecider, w: int): bool = {
