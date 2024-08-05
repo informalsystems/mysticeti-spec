@@ -2,16 +2,17 @@
 
 module mysticeti_c {
   import basicSpells.* from "./spells/basicSpells"
+  import rareSpells.* from "./spells/rareSpells"
 
   type Validator = int
   type Round = int
 
   type ProposerSlot = (Validator, Round)
   type ProposerSlotState = Commit(StatementBlock) | Skip(ProposerSlot) | Undecided
-  type Decision = { status: ProposerSlotState, round: Round, authority: Validator }
+  type Decision = { status: ProposerSlotState, round: Round, authority: Validator, leader_rank: int }
   type BlockWithState = { block: StatementBlock, state: ProposerSlotState }
 
-  type BlockReference = { authority: int, round: Round, label: str }
+  type BlockReference = { authority: int, round: Round, label: str, leader_rank: int }
   type StatementBlock = { reference: BlockReference, includes: Set[BlockReference] }
 
   type BlockStore = { blocks_by_round: Round -> Set[StatementBlock], highest_round: Round }
@@ -24,28 +25,28 @@ module mysticeti_c {
   pure val NUM_OF_PROPOSERS = 4
   pure val FAULTY = 1
 
-  pure val L1a = { authority: 0, round: 0, label: "L1a" }
-  pure val L1b = { authority: 1, round: 0, label: "L1b" }
-  pure val L1c = { authority: 2, round: 0, label: "L1c" }
-  pure val L1d = { authority: 3, round: 0, label: "L1d" }
-  pure val L2d = { authority: 0, round: 1, label: "L2d" }
-  pure val L2a = { authority: 1, round: 1, label: "L2a" }
-  pure val L2b = { authority: 2, round: 1, label: "L2b" }
-  pure val L2c = { authority: 3, round: 1, label: "L2c" }
-  pure val L3c = { authority: 0, round: 2, label: "L3c" }
-  pure val L3d = { authority: 1, round: 2, label: "L3d" }
-  pure val L3b = { authority: 3, round: 2, label: "L3b" }
-  pure val L4d = { authority: 0, round: 3, label: "L4d" }
-  pure val L4a = { authority: 1, round: 3, label: "L4a" }
-  pure val L4b = { authority: 2, round: 3, label: "L4b" }
-  pure val L4c = { authority: 3, round: 3, label: "L4c" }
-  pure val L5c = { authority: 0, round: 4, label: "L5c" }
-  pure val L5d = { authority: 1, round: 4, label: "L5d" }
-  pure val L5a = { authority: 2, round: 4, label: "L5a" }
-  pure val L5b = { authority: 3, round: 4, label: "L5b" }
-  pure val L6b = { authority: 0, round: 5, label: "L6b" }
-  pure val L6c = { authority: 1, round: 5, label: "L6c" }
-  pure val L6d = { authority: 2, round: 5, label: "L6d" }
+  pure val L1a = { authority: 0, round: 0, label: "L1a", leader_rank: 0 }
+  pure val L1b = { authority: 1, round: 0, label: "L1b", leader_rank: 1 }
+  pure val L1c = { authority: 2, round: 0, label: "L1c", leader_rank: 2 }
+  pure val L1d = { authority: 3, round: 0, label: "L1d", leader_rank: 3 }
+  pure val L2d = { authority: 0, round: 1, label: "L2d", leader_rank: 3 }
+  pure val L2a = { authority: 1, round: 1, label: "L2a", leader_rank: 0 }
+  pure val L2b = { authority: 2, round: 1, label: "L2b", leader_rank: 1 }
+  pure val L2c = { authority: 3, round: 1, label: "L2c", leader_rank: 2 }
+  pure val L3c = { authority: 0, round: 2, label: "L3c", leader_rank: 2 }
+  pure val L3d = { authority: 1, round: 2, label: "L3d", leader_rank: 3 }
+  pure val L3b = { authority: 3, round: 2, label: "L3b", leader_rank: 1 }
+  pure val L4d = { authority: 0, round: 3, label: "L4d", leader_rank: 3 }
+  pure val L4a = { authority: 1, round: 3, label: "L4a", leader_rank: 0 }
+  pure val L4b = { authority: 2, round: 3, label: "L4b", leader_rank: 1 }
+  pure val L4c = { authority: 3, round: 3, label: "L4c", leader_rank: 2 }
+  pure val L5c = { authority: 0, round: 4, label: "L5c", leader_rank: 2 }
+  pure val L5d = { authority: 1, round: 4, label: "L5d", leader_rank: 3 }
+  pure val L5a = { authority: 2, round: 4, label: "L5a", leader_rank: 0 }
+  pure val L5b = { authority: 3, round: 4, label: "L5b", leader_rank: 1 }
+  pure val L6b = { authority: 0, round: 5, label: "L6b", leader_rank: 1 }
+  pure val L6c = { authority: 1, round: 5, label: "L6c", leader_rank: 2 }
+  pure val L6d = { authority: 2, round: 5, label: "L6d", leader_rank: 3 }
 
   pure val DAG = Set(
     { reference: L1a, includes: Set() },
@@ -191,7 +192,7 @@ module mysticeti_c {
     // The paper uses the decision round in the pseudocode, but the text always mentions r' > r + 2.
     // I couldn't make it work it the decision round, but r' > r + 2 works.
     pure val r_proposer = d.proposer_round(w)
-    pure val anchors = sequence.select(s => s.round > r_proposer + 2)
+    pure val anchors = sequence.select(s => s.round == r_proposer + 3).toSet().toList((s1, s2) => intCompare(s1.leader_rank, s2.leader_rank))
 
     // FIXME: define and use a `first` operator?
     // FIXME: The orther of anchors depends on the rank of the leaders
@@ -226,24 +227,30 @@ module mysticeti_c {
   }
 
   pure def try_decide(block_store, sequence, r, l) = {
-    if (r > block_store.highest_round - 2) {
-      ([{ status: Undecided, round: r, authority: l }].concat(sequence))
-    } else {
-      pure val i = r % WAVE_LENGTH
-      pure val c = direct_decider(block_store, WAVE_LENGTH, i, l)
-      pure val w = c.wave_number(r)
-      if (c.proposer_round(w) != r) {
-         sequence
-      } else {
-        pure val direct_status = q::debug("try direct decide", c.try_direct_decide(w))
-        pure val status = if (direct_status == Undecided) {
-          q::debug("try indirect decide", c.try_indirect_decide(w, sequence))
-        } else {
-          direct_status
-        }
-        ([{ status: status, round: r, authority: l }].concat(sequence))
-      }
-   }
+    pure val i = r % WAVE_LENGTH
+    pure val c = direct_decider(block_store, WAVE_LENGTH, i, l)
+    pure val w = c.wave_number(r)
+    pure val proposer_block = c.get_proposer_block(w)
+    match proposer_block {
+      | None => q::debug("not found", sequence)
+      | Some(block) => {
+         if (r > block_store.highest_round - 2) {
+           ([{ status: Undecided, round: r, authority: l, leader_rank: block.reference.leader_rank }].concat(sequence))
+         } else {
+           if (c.proposer_round(w) != r) {
+              sequence
+           } else {
+             pure val direct_status = q::debug("try direct decide", c.try_direct_decide(w))
+             pure val status = if (direct_status == Undecided) {
+               q::debug("try indirect decide", c.try_indirect_decide(w, sequence))
+             } else {
+               direct_status
+             }
+             ([{ status: status, round: r, authority: l, leader_rank: block.reference.leader_rank }].concat(sequence))
+           }
+         }
+       }
+     }
 
     // FIXME: Move this to step so it is only done after all iterations of try_decide
     // if (l == 0) {
