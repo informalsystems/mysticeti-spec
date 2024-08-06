@@ -22,20 +22,18 @@ use ratatui::widgets::canvas::Line;
 use ratatui::widgets::{Block, Borders};
 use ratatui::Terminal;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct BlockReference {
     pub authority: BigInt,
     pub round: BigInt,
     pub label: String,
 }
 
-type ProposerSlot = (BigInt, BigInt);
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "tag", content = "value")]
 pub enum ProposerSlotState {
-    Commit(StatementBlock),
-    Skip(ProposerSlot),
+    Commit,
+    Skip,
     Undecided,
 }
 
@@ -46,14 +44,45 @@ pub struct StatementBlock {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct BlockWithState {
-    block: StatementBlock,
-    state: ProposerSlotState,
+#[serde(tag = "tag", content = "value")]
+pub enum Log {
+    IncompleteWave,
+    DirectDecision,
+    IndirectDecision(BlockReference),
+    Error,
+    UnableToDecide,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Decision {
+    pub status: ProposerSlotState,
+    pub block: BlockReference,
+    pub log: Log,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct BlockStore {
+    pub blocks: HashMap<BigInt, HashMap<BigInt, StatementBlock>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct State {
-    pub dag: Vec<BlockWithState>,
+    pub result: Vec<Decision>,
+    pub block_store: BlockStore,
+}
+
+fn coordinates(authority: BigInt, round: BigInt) -> (f64, f64) {
+    let x = round.to_f64().unwrap() * 15.0;
+    let y = (3.0 - authority.to_f64().unwrap()) * 5.0 + 1.5;
+    (x, y)
+}
+
+fn color_from_status(status: ProposerSlotState) -> ratatui::prelude::Color {
+    match status {
+        ProposerSlotState::Commit => Color::Green,
+        ProposerSlotState::Skip => Color::Red,
+        ProposerSlotState::Undecided => Color::Gray,
+    }
 }
 
 fn draw_dag(f: &mut ratatui::Frame, state: &State) {
@@ -61,17 +90,14 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
         .constraints(vec![Constraint::Percentage(100)])
         .split(f.size());
 
-    let mut node_positions: HashMap<String, (f64, f64)> = HashMap::new();
     let mut edges: Vec<Line> = Vec::new();
 
-    // Calculate positions and prepare edges
-    for block in &state.dag {
-        let x = block.block.reference.round.to_f64().unwrap() * 15.0;
-        let y = (3.0 - block.block.reference.authority.to_f64().unwrap()) * 5.0 + 1.5;
-        node_positions.insert(block.block.reference.label.clone(), (x, y));
+    state.block_store.blocks.iter().for_each(|(round, blocks)| {
+        blocks.iter().for_each(|(authority, block)| {
+            let (x, y) = coordinates(authority.clone(), round.clone());
 
-        for include in &block.block.includes {
-            if let Some(&(ix, iy)) = node_positions.get(&include.label) {
+            for include in &block.includes {
+                let (ix, iy) = coordinates(include.authority.clone(), include.round.clone());
                 edges.push(Line {
                     x1: ix,
                     y1: iy,
@@ -80,8 +106,8 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
                     color: Color::Blue,
                 });
             }
-        }
-    }
+        });
+    });
 
     let canvas = Canvas::default()
         .block(Block::default().borders(Borders::ALL).title("DAG"))
@@ -91,15 +117,36 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
                 ctx.draw(&edge);
             }
 
-            // Draw nodes
-            for block in &state.dag {
-                if let Some(&(x, y)) = node_positions.get(&block.block.reference.label) {
-                    let color = match block.state {
-                        ProposerSlotState::Undecided => Color::Gray,
-                        ProposerSlotState::Commit(_) => Color::Green,
-                        ProposerSlotState::Skip(_) => Color::Red,
-                    };
+            if let Some(last_result) = state.result.first() {
+                ctx.print(
+                    15.0,
+                    18.0,
+                    Span::styled(
+                        format!(
+                            "{:?}: {:?} {:?}",
+                            last_result.block.label, last_result.log, last_result.status
+                        ),
+                        Style::default().fg(color_from_status(last_result.status.clone())),
+                    ),
+                );
+            }
 
+            // Draw nodes
+            state.block_store.blocks.iter().for_each(|(round, blocks)| {
+                blocks.iter().for_each(|(authority, block)| {
+                    let color = state
+                        .result
+                        .iter()
+                        .find_map(|decision| {
+                            if decision.block == block.reference {
+                                Some(color_from_status(decision.status.clone()))
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(Color::Gray);
+
+                    let (x, y) = coordinates(authority.clone(), round.clone());
                     ctx.draw(&Points {
                         coords: &[(x, y)],
                         color,
@@ -108,13 +155,10 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
                     ctx.print(
                         x,
                         y,
-                        Span::styled(
-                            block.block.reference.label.clone(),
-                            Style::default().fg(color),
-                        ),
+                        Span::styled(block.reference.label.clone(), Style::default().fg(color)),
                     );
-                }
-            }
+                });
+            });
         })
         .x_bounds([0.0, 110.0])
         .y_bounds([0.0, 20.0]);

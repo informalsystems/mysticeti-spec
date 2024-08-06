@@ -7,21 +7,18 @@ module mysticeti_c {
   type Validator = int
   type Round = int
 
-  type ProposerSlot = (Validator, Round)
-  type ProposerSlotState = Commit(StatementBlock) | Skip(ProposerSlot) | Undecided
-  type Decision = { status: ProposerSlotState, round: Round, authority: Validator, leader_rank: int }
-  type BlockWithState = { block: StatementBlock, state: ProposerSlotState }
+  type ProposerSlotState = Commit | Skip | Undecided
+  type Decision = { status: ProposerSlotState, block: BlockReference, log: Log }
+  type Log = IncompleteWave | DirectDecision | IndirectDecision(BlockReference) | Error | UnableToDecide
 
   type BlockReference = { authority: int, round: Round, label: str, leader_rank: int }
   type StatementBlock = { reference: BlockReference, includes: Set[BlockReference] }
 
-  type BlockStore = { blocks_by_round: Round -> Set[StatementBlock], highest_round: Round }
-
+  type BlockStore = { blocks: Round -> Validator -> StatementBlock, highest_round: Round }
   type DirectDecider = { block_store: BlockStore, wave_length: int, round_offset: int, proposer_offset: int }
 
   pure val WAVE_LENGTH = 3
   pure val ROUND_OFFSET = 0
-  pure val VALIDATORS = Set("A0", "A1", "A2", "A3")
   pure val NUM_OF_PROPOSERS = 4
   pure val FAULTY = 1
 
@@ -74,13 +71,13 @@ module mysticeti_c {
   )
 
   pure def parents(store: BlockStore, block: StatementBlock): Set[StatementBlock] = {
-    pure val potential_parents = store.blocks_by_round.getOrElse(block.reference.round + 1, Set())
+    pure val potential_parents = store.blocks_by_round(block.reference.round + 1)
     potential_parents.filter(parent => block.includes.contains(parent.reference))
   }
 
   pure def link(store: BlockStore, later_block: StatementBlock, earlier_block: StatementBlock): bool = {
     val linked_to_later = range(earlier_block.reference.round, later_block.reference.round).foldl(Set(later_block), (parents, r) => {
-      val blocks = store.blocks_by_round.get(r)
+      val blocks = store.blocks_by_round(r)
       blocks.filter(block => parents.exists(parent => parent.includes.contains(block.reference)))
     })
 
@@ -109,20 +106,27 @@ module mysticeti_c {
   //   VALIDATORS[r_proposer % NUM_OF_PROPOSERS]
   // }
 
-  pure def get_proposer_block(d: DirectDecider, w: int): Option[StatementBlock] = {
+  pure def block_by_reference(d: DirectDecider, reference: BlockReference): StatementBlock = {
+    d.block_store.blocks.get(reference.round).get(reference.authority)
+  }
+
+  pure def blocks_by_round(b: BlockStore, round: Round): Set[StatementBlock] = {
+    b.blocks.getOrElse(round, Map()).values()
+  }
+
+  pure def get_proposer_block(d: DirectDecider, w: int): StatementBlock = {
     pure val r_proposer = d.proposer_round(w)
-    pure val id = (d.proposer_offset, r_proposer)
-    d.block_store.blocks_by_round.get(r_proposer).find(block => (block.reference.authority, block.reference.round) == id)
+    d.block_store.blocks.get(r_proposer).get(d.proposer_offset)
   }
 
   pure def get_first_voting_blocks(d: DirectDecider, w: int): Set[StatementBlock] = {
     pure val r_voting = d.proposer_round(w) + 1
-    d.block_store.blocks_by_round.get(r_voting)
+    d.block_store.blocks_by_round(r_voting)
   }
 
   pure def get_decision_blocks(d: DirectDecider, w: int): Set[StatementBlock] = {
     pure val r_decision = d.decision_round(w)
-    d.block_store.blocks_by_round.get(r_decision)
+    d.block_store.blocks_by_round(r_decision)
   }
 
   pure def is_vote(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
@@ -141,24 +145,18 @@ module mysticeti_c {
     // pure val id = d.get_predefined_proposer(w) // mistake on pseudocode here?
     pure val id = (d.proposer_offset, r_proposer)
     pure val blocks = d.get_first_voting_blocks(w)
-    // pure val non_supporters = blocks.filter(block => not(d.block_store.parents(block).exists(parent => (parent.reference.authority, parent.reference.round) == id)))
     pure val non_supporters = blocks.filter(block => not(block.includes.exists(child => (child.authority, child.round) == id)))
     non_supporters.size() >= 2*FAULTY + 1
   }
 
   pure def supported_proposer(d: DirectDecider, w: int): Option[StatementBlock] = {
-    pure val b_proposer = q::debug("b_proposer", d.get_proposer_block(w))
-    match b_proposer {
-      | None => None
-      | Some(proposed_block) => {
-        pure val blocks = d.get_decision_blocks(w)
-        pure val supporters = blocks.filter(block => d.is_vote(block, proposed_block))
-        if (supporters.size() >= 2*FAULTY + 1) {
-          Some(proposed_block)
-        } else {
-          None
-        }
-      }
+    pure val b_proposer = d.get_proposer_block(w)
+    pure val blocks = d.get_decision_blocks(w)
+    pure val supporters = blocks.filter(block => d.is_vote(block, b_proposer))
+    if (supporters.size() >= 2*FAULTY + 1) {
+      Some(b_proposer)
+    } else {
+      None
     }
   }
 
@@ -168,60 +166,50 @@ module mysticeti_c {
     blocks.exists(block => d.is_cert(block, b_proposer) and d.block_store.link(block, b_anchor))
   }
 
-  pure def slot_round(s: ProposerSlotState): Round = {
-    match s {
-      | Commit(b) => b.reference.round
-      | Skip(t) => t._2 // I can't tell if this is case is right from the pseudocode
-      | Undecided => 0
-    }
-  }
-
-  pure def try_direct_decide(d: DirectDecider, w: int): ProposerSlotState = {
-    if (d.skipped_proposer(w)) {
-      Skip((d.proposer_offset, d.proposer_round(w)))
+  pure def try_direct_decide(d: DirectDecider, w: int): Decision = {
+    pure val status = if (d.skipped_proposer(w)) {
+      Skip
     } else {
       pure val b_proposer = d.supported_proposer(w)
       match b_proposer {
         | None => Undecided
-        | Some(proposed_block) => Commit(proposed_block)
+        | Some(_) => Commit
       }
     }
+    pure val block = d.get_proposer_block(w)
+    { status: status, block: block.reference, log: DirectDecision }
   }
 
-  pure def try_indirect_decide(d: DirectDecider, w: int, sequence: List[Decision]): ProposerSlotState = {
+  pure def try_indirect_decide(d: DirectDecider, w: int, sequence: List[Decision]): Decision = {
     // The paper uses the decision round in the pseudocode, but the text always mentions r' > r + 2.
     // I couldn't make it work it the decision round, but r' > r + 2 works.
     pure val r_proposer = d.proposer_round(w)
-    pure val anchors = sequence.select(s => s.round == r_proposer + 3).toSet().toList((s1, s2) => intCompare(s1.leader_rank, s2.leader_rank))
+    pure val b_proposer = d.get_proposer_block(w)
+    pure val anchors = sequence.select(s => s.block.round == r_proposer + 3).toSet().toList((s1, s2) => intCompare(s1.block.leader_rank, s2.block.leader_rank))
 
     // FIXME: define and use a `first` operator?
-    // FIXME: The orther of anchors depends on the rank of the leaders
     pure val result = anchors.foldl(None, (res, a) => {
       if (res != None) {
         res
       } else {
-        match q::debug("potential anchor", a).status {
-          | Undecided => Some(Undecided)
-          | Commit(b_anchor) => {
-            pure val b_proposer = d.get_proposer_block(w)
-            match b_proposer {
-              | None => res
-              | Some(block) => {
-                  if (d.certified_link(q::debug("anchor", b_anchor), block)) {
-                    Some(Commit(block))
-                  } else {
-                    Some(Skip((block.reference.authority, block.reference.round)))
-                  }
-              }
+        match a.status {
+          | Undecided => Some({ status: Undecided, block: b_proposer.reference, log: IndirectDecision(a.block) })
+          | Commit => {
+            pure val b_anchor = d.block_by_reference(a.block)
+            pure val status = if (d.certified_link(b_anchor, b_proposer)) {
+              Commit
+            } else {
+              Skip
             }
+            Some({ status: status, block: b_proposer.reference, log: IndirectDecision(b_anchor.reference) })
           }
-          | Skip(_) => res
+          | Skip => res
         }
-      }
-    })
+       }
+     })
 
     match result {
-      | None => Undecided
+      | None => { status: Undecided, block: b_proposer.reference, log: UnableToDecide }
       | Some(s) => s
     }
   }
@@ -231,26 +219,21 @@ module mysticeti_c {
     pure val c = direct_decider(block_store, WAVE_LENGTH, i, l)
     pure val w = c.wave_number(r)
     pure val proposer_block = c.get_proposer_block(w)
-    match proposer_block {
-      | None => q::debug("not found", sequence)
-      | Some(block) => {
-         if (r > block_store.highest_round - 2) {
-           ([{ status: Undecided, round: r, authority: l, leader_rank: block.reference.leader_rank }].concat(sequence))
-         } else {
-           if (c.proposer_round(w) != r) {
-              sequence
-           } else {
-             pure val direct_status = q::debug("try direct decide", c.try_direct_decide(w))
-             pure val status = if (direct_status == Undecided) {
-               q::debug("try indirect decide", c.try_indirect_decide(w, sequence))
-             } else {
-               direct_status
-             }
-             ([{ status: status, round: r, authority: l, leader_rank: block.reference.leader_rank }].concat(sequence))
-           }
-         }
-       }
-     }
+    if (r > block_store.highest_round - 2) {
+      ([{ status: Undecided, block: proposer_block.reference, log: IncompleteWave }].concat(sequence))
+    } else {
+      if (c.proposer_round(w) != r) {
+         sequence
+      } else {
+        pure val direct_status = c.try_direct_decide(w)
+        pure val status = if (direct_status.status == Undecided) {
+          c.try_indirect_decide(w, sequence)
+        } else {
+          direct_status
+        }
+        ([status].concat(sequence))
+      }
+    }
 
     // FIXME: Move this to step so it is only done after all iterations of try_decide
     // if (l == 0) {
@@ -269,36 +252,29 @@ module mysticeti_c {
     // }
   }
 
-  var dag: Set[BlockWithState]
+  var block_store: BlockStore
   var result: List[Decision]
   var round_to_process: int
   var validator_to_process: int
 
   action init = all {
-    dag' = DAG.map(block => { block: block, state: Undecided }),
-    result' = [],
+    block_store' = { blocks: DAG.fold(Map(), (m, block) => if (m.has(block.reference.round)) m.setBy(block.reference.round, row => row.put(block.reference.authority, block)) else m.put(block.reference.round, Map(block.reference.authority -> block))), highest_round: 5 },
     round_to_process' = 5,
-    validator_to_process' = NUM_OF_PROPOSERS - 1
+    validator_to_process' = NUM_OF_PROPOSERS - 1,
+    result' = [],
   }
 
-  action step =
-    val block_store = { blocks_by_round: 0.to(7).mapBy(round => DAG.filter(b => b.reference.round == round)), highest_round: 5 }
-    val new_result = try_decide(block_store, result, round_to_process, validator_to_process)
-    all {
-      round_to_process >= 0,
-      dag' = DAG.map(block => { block: block, state: find_state(new_result, block.reference) }),
-      result' = new_result,
-      round_to_process' = if (validator_to_process == 0) round_to_process - 1 else round_to_process,
-      validator_to_process' = if (validator_to_process == 0) NUM_OF_PROPOSERS - 1 else validator_to_process - 1,
+  action step = all {
+    round_to_process >= 0,
+    validator_to_process >= 0,
+    block_store' = block_store,
+    val new_result = if (block_store.blocks.get(round_to_process).has(validator_to_process)) {
+      try_decide(block_store, result, round_to_process, validator_to_process)
+    } else {
+      result
     }
-
-  pure def find_state(result: List[Decision], block: BlockReference): ProposerSlotState = {
-    result.foldl(Undecided, (state, res) => {
-      match res.status {
-      | Commit(b) => if (b.reference == block) Commit(b) else state
-      | Skip(t) => if (t == (block.authority, block.round)) Skip(t) else state
-      | _ => state
-      }
-    })
+    result' = new_result,
+    round_to_process' = if (validator_to_process == 0) round_to_process - 1 else round_to_process,
+    validator_to_process' = if (validator_to_process == 0) NUM_OF_PROPOSERS - 1 else validator_to_process - 1,
   }
 }
