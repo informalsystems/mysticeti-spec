@@ -268,10 +268,11 @@ module mysticeti_c {
     round_to_process >= 0,
     validator_to_process >= 0,
     block_store' = block_store,
-    val new_result = if (block_store.blocks.get(round_to_process).has(validator_to_process)) {
-      try_decide(block_store, result, round_to_process, validator_to_process)
-    } else {
-      result
+    val new_result = match block_store.blocks.get(round_to_process).values().find(b => b.reference.leader_rank == validator_to_process) {
+      | None => result
+      | Some(block) => {
+         try_decide(block_store, result, block.reference.round, block.reference.authority)
+      }
     }
     result' = new_result,
     round_to_process' = if (validator_to_process == 0) round_to_process - 1 else round_to_process,
