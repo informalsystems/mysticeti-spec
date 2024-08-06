@@ -7,22 +7,18 @@ module mysticeti_c {
   type Validator = int
   type Round = int
 
-  type ProposerSlot = (Validator, Round)
   type ProposerSlotState = Commit | Skip | Undecided
   type Decision = { status: ProposerSlotState, block: BlockReference, log: Log }
-  type BlockWithState = { block: StatementBlock, state: ProposerSlotState }
   type Log = IncompleteWave | DirectDecision | IndirectDecision(BlockReference) | Error | UnableToDecide
 
   type BlockReference = { authority: int, round: Round, label: str, leader_rank: int }
   type StatementBlock = { reference: BlockReference, includes: Set[BlockReference] }
 
   type BlockStore = { blocks: Round -> Validator -> StatementBlock, highest_round: Round }
-
   type DirectDecider = { block_store: BlockStore, wave_length: int, round_offset: int, proposer_offset: int }
 
   pure val WAVE_LENGTH = 3
   pure val ROUND_OFFSET = 0
-  pure val VALIDATORS = Set("A0", "A1", "A2", "A3")
   pure val NUM_OF_PROPOSERS = 4
   pure val FAULTY = 1
 
@@ -149,13 +145,12 @@ module mysticeti_c {
     // pure val id = d.get_predefined_proposer(w) // mistake on pseudocode here?
     pure val id = (d.proposer_offset, r_proposer)
     pure val blocks = d.get_first_voting_blocks(w)
-    // pure val non_supporters = blocks.filter(block => not(d.block_store.parents(block).exists(parent => (parent.reference.authority, parent.reference.round) == id)))
     pure val non_supporters = blocks.filter(block => not(block.includes.exists(child => (child.authority, child.round) == id)))
     non_supporters.size() >= 2*FAULTY + 1
   }
 
   pure def supported_proposer(d: DirectDecider, w: int): Option[StatementBlock] = {
-    pure val b_proposer = q::debug("b_proposer", d.get_proposer_block(w))
+    pure val b_proposer = d.get_proposer_block(w)
     pure val blocks = d.get_decision_blocks(w)
     pure val supporters = blocks.filter(block => d.is_vote(block, b_proposer))
     if (supporters.size() >= 2*FAULTY + 1) {
@@ -257,42 +252,29 @@ module mysticeti_c {
     // }
   }
 
-  var dag: Set[BlockWithState]
+  var block_store: BlockStore
   var result: List[Decision]
   var round_to_process: int
   var validator_to_process: int
 
   action init = all {
-    dag' = DAG.map(block => { block: block, state: Undecided }),
-    result' = [],
+    block_store' = { blocks: DAG.fold(Map(), (m, block) => if (m.has(block.reference.round)) m.setBy(block.reference.round, row => row.put(block.reference.authority, block)) else m.put(block.reference.round, Map(block.reference.authority -> block))), highest_round: 5 },
     round_to_process' = 5,
-    validator_to_process' = NUM_OF_PROPOSERS - 1
+    validator_to_process' = NUM_OF_PROPOSERS - 1,
+    result' = [],
   }
 
-  action step =
-    val block_store = { blocks: DAG.fold(Map(), (m, block) => if (m.has(block.reference.round)) m.setBy(block.reference.round, row => row.put(block.reference.authority, block)) else m.put(block.reference.round, Map(block.reference.authority -> block))), highest_round: 5 }
+  action step = all {
+    round_to_process >= 0,
+    validator_to_process >= 0,
+    block_store' = block_store,
     val new_result = if (block_store.blocks.get(round_to_process).has(validator_to_process)) {
       try_decide(block_store, result, round_to_process, validator_to_process)
     } else {
       result
     }
-    all {
-      round_to_process >= 0,
-      dag' = DAG.map(block => { block: block, state: find_state(new_result, block.reference).status }),
-      result' = new_result,
-      round_to_process' = if (validator_to_process == 0) round_to_process - 1 else round_to_process,
-      validator_to_process' = if (validator_to_process == 0) NUM_OF_PROPOSERS - 1 else validator_to_process - 1,
-    }
-
-  pure def find_state(result: List[Decision], block: BlockReference): Decision = {
-    // FIXME: replace with find
-    pure val default = { status: Undecided, block: block, log: Error }
-    result.foldl(default, (state, res) => {
-      if (res.block == block) {
-        res
-      } else {
-        state
-      }
-    })
+    result' = new_result,
+    round_to_process' = if (validator_to_process == 0) round_to_process - 1 else round_to_process,
+    validator_to_process' = if (validator_to_process == 0) NUM_OF_PROPOSERS - 1 else validator_to_process - 1,
   }
 }
