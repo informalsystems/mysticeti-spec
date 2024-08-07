@@ -16,10 +16,9 @@ module mysticeti_c {
   type StatementBlock = { reference: BlockReference, includes: Set[BlockReference] }
 
   type BlockStore = { blocks: Round -> Validator -> StatementBlock, highest_round: Round }
-  type DirectDecider = { block_store: BlockStore, wave_length: int, round_offset: int, proposer_offset: int }
+  type DirectDecider = { block_store: BlockStore, proposer_block: StatementBlock }
 
-  pure val WAVE_LENGTH = 3
-  pure val ROUND_OFFSET = 0
+  // pure val WAVE_LENGTH = 3
   pure val NUM_OF_PROPOSERS = 4
   pure val FAULTY = 1
 
@@ -105,16 +104,10 @@ module mysticeti_c {
     })).flatten()
   }
 
-  pure def direct_decider(block_store: BlockStore, wave_length: int, round_offset: int, proposer_offset: int): DirectDecider = {
-    { block_store: block_store, wave_length: wave_length, round_offset: round_offset, proposer_offset: proposer_offset }
-  }
+  pure def direct_decider(block_store: BlockStore, round: int, proposer: int): DirectDecider = {
+    pure val proposer_block = block_store.blocks.get(round).get(proposer)
 
-  pure def wave_number(d: DirectDecider, round: Round): int = {
-    (round - d.round_offset) / d.wave_length
-  }
-
-  pure def proposer_round(d: DirectDecider, w: int): int = {
-    w * d.wave_length + d.round_offset
+    { block_store: block_store, proposer_block: proposer_block }
   }
 
   pure def block_by_reference(d: DirectDecider, reference: BlockReference): StatementBlock = {
@@ -125,21 +118,12 @@ module mysticeti_c {
     b.blocks.getOrElse(round, Map()).values()
   }
 
-  pure def get_proposer_block(d: DirectDecider, w: int): StatementBlock = {
-    pure val r_proposer = d.proposer_round(w)
-    d.block_store.blocks.get(r_proposer).get(d.proposer_offset)
-  }
+  pure def skipped_proposer(d: DirectDecider): bool = {
+    pure val r_proposer = d.proposer_block.reference.round
+    pure val authority = d.proposer_block.reference.authority
+    pure val id = (authority, r_proposer)
+    pure val blocks = d.block_store.blocks_by_round(r_proposer + 1)
 
-  pure def get_first_voting_blocks(d: DirectDecider, w: int): Set[StatementBlock] = {
-    pure val r_voting = d.proposer_round(w) + 1
-    d.block_store.blocks_by_round(r_voting)
-  }
-
-  pure def skipped_proposer(d: DirectDecider, w: int): bool = {
-    pure val r_proposer = d.proposer_round(w)
-    // pure val id = d.get_predefined_proposer(w) // mistake on pseudocode here?
-    pure val id = (d.proposer_offset, r_proposer)
-    pure val blocks = d.get_first_voting_blocks(w)
     pure val non_supporters = blocks.filter(block => not(block.includes.exists(child => (child.authority, child.round) == id)))
     non_supporters.size() >= 2*FAULTY + 1
   }
@@ -158,14 +142,14 @@ module mysticeti_c {
     { patterns: parents_with_link.size(), edges: edges }
   }
 
-  pure def try_direct_decide(d: DirectDecider, w: int): Decision = {
-    pure val block = d.get_proposer_block(w)
+  pure def try_direct_decide(d: DirectDecider): Decision = {
+    pure val block = d.proposer_block
     // certificates are in r + 2
     pure val certificates = d.block_store.parents(block).map(b =>
       d.block_store.parents(b).filter(c => c.includes.filter(b2 => d.block_by_reference(b2).includes.contains(block.reference)).size() >= 2*FAULTY + 1)
     ).flatten()
     pure val supporting_edges = certificates.map(c => d.block_store.link_edges(c, block)).flatten()
-    pure val status = if (d.skipped_proposer(w)) {
+    pure val status = if (d.skipped_proposer()) {
       Skip
     } else if (certificates.size() >= 2*FAULTY + 1) {
       Commit
@@ -175,11 +159,11 @@ module mysticeti_c {
     { status: status, block: block.reference, log: DirectDecision(supporting_edges) }
   }
 
-  pure def try_indirect_decide(d: DirectDecider, w: int, sequence: List[Decision]): Decision = {
+  pure def try_indirect_decide(d: DirectDecider, sequence: List[Decision]): Decision = {
     // The paper uses the decision round in the pseudocode, but the text always mentions r' > r + 2.
     // I couldn't make it work it the decision round, but r' > r + 2 works.
-    pure val r_proposer = d.proposer_round(w)
-    pure val b_proposer = d.get_proposer_block(w)
+    pure val b_proposer = d.proposer_block
+    pure val r_proposer = b_proposer.reference.round
     pure val anchors = sequence.select(s => s.block.round == r_proposer + 3).toSet().toList((s1, s2) => intCompare(s1.block.leader_rank, s2.block.leader_rank))
 
     // FIXME: define and use a `first` operator?
@@ -211,24 +195,18 @@ module mysticeti_c {
   }
 
   pure def try_decide(block_store, sequence, r, l) = {
-    pure val i = r % WAVE_LENGTH
-    pure val c = direct_decider(block_store, WAVE_LENGTH, i, l)
-    pure val w = c.wave_number(r)
-    pure val proposer_block = c.get_proposer_block(w)
+    pure val c = direct_decider(block_store, r, l)
+    pure val proposer_block = c.proposer_block
     if (r > block_store.highest_round - 2) {
       ([{ status: Undecided, block: proposer_block.reference, log: IncompleteWave }].concat(sequence))
     } else {
-      if (c.proposer_round(w) != r) {
-         sequence
+      pure val direct_status = c.try_direct_decide()
+      pure val status = if (direct_status.status == Undecided) {
+        c.try_indirect_decide(sequence)
       } else {
-        pure val direct_status = c.try_direct_decide(w)
-        pure val status = if (direct_status.status == Undecided) {
-          c.try_indirect_decide(w, sequence)
-        } else {
-          direct_status
-        }
-        ([status].concat(sequence))
+        direct_status
       }
+      ([status].concat(sequence))
     }
 
     // FIXME: Move this to step so it is only done after all iterations of try_decide
