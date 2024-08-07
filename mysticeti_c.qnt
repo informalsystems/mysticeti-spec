@@ -9,7 +9,7 @@ module mysticeti_c {
 
   type ProposerSlotState = Commit | Skip | Undecided
   type Decision = { status: ProposerSlotState, block: BlockReference, log: Log }
-  type Log = IncompleteWave | DirectDecision | IndirectDecision(BlockReference) | Error | UnableToDecide
+  type Log = IncompleteWave | DirectDecision(Set[(BlockReference, BlockReference)]) | IndirectDecision(BlockReference) | Error | UnableToDecide
 
   type BlockReference = { authority: int, round: Round, label: str, leader_rank: int }
   type StatementBlock = { reference: BlockReference, includes: Set[BlockReference] }
@@ -72,16 +72,16 @@ module mysticeti_c {
 
   pure def parents(store: BlockStore, block: StatementBlock): Set[StatementBlock] = {
     pure val potential_parents = store.blocks_by_round(block.reference.round + 1)
-    potential_parents.filter(parent => block.includes.contains(parent.reference))
+    potential_parents.filter(parent => parent.includes.contains(block.reference))
   }
 
   pure def link(store: BlockStore, later_block: StatementBlock, earlier_block: StatementBlock): bool = {
-    val linked_to_later = range(earlier_block.reference.round, later_block.reference.round).foldl(Set(later_block), (parents, r) => {
+    val linked_to_earlier = range(earlier_block.reference.round + 1, later_block.reference.round + 1).foldl(Set(earlier_block), (parents, r) => {
       val blocks = store.blocks_by_round(r)
-      blocks.filter(block => parents.exists(parent => parent.includes.contains(block.reference)))
+      parents.union(blocks.filter(block => parents.exists(parent => block.includes.contains(parent.reference))))
     })
 
-    linked_to_later.contains(earlier_block)
+    linked_to_earlier.contains(later_block)
   }
 
   pure def direct_decider(block_store: BlockStore, wave_length: int, round_offset: int, proposer_offset: int): DirectDecider = {
@@ -149,35 +149,37 @@ module mysticeti_c {
     non_supporters.size() >= 2*FAULTY + 1
   }
 
-  pure def supported_proposer(d: DirectDecider, w: int): Option[StatementBlock] = {
-    pure val b_proposer = d.get_proposer_block(w)
-    pure val blocks = d.get_decision_blocks(w)
-    pure val supporters = blocks.filter(block => d.is_vote(block, b_proposer))
-    if (supporters.size() >= 2*FAULTY + 1) {
-      Some(b_proposer)
-    } else {
-      None
-    }
-  }
+  // pure def supported_proposer(d: DirectDecider, w: int): Option[StatementBlock] = {
+  //   pure val b_proposer = d.get_proposer_block(w)
+  //   pure val blocks = d.block_store.parents(b_proposer)
+  //   pure val supporters = blocks.filter(block => d.is_cert(block, b_proposer))
+  //   if (supporters.size() >= 2*FAULTY + 1) {
+  //     Some(b_proposer)
+  //   } else {
+  //     None
+  //   }
+  // }
 
+  // I have three parents that are linked to the anchor
   pure def certified_link(d: DirectDecider, b_anchor: StatementBlock, b_proposer: StatementBlock): bool = {
-    pure val w = d.wave_number(b_proposer.reference.round)
-    pure val blocks = d.get_decision_blocks(w)
-    blocks.exists(block => d.is_cert(block, b_proposer) and d.block_store.link(block, b_anchor))
+    d.block_store.parents(b_proposer).filter(b => d.block_store.link(b_anchor, b)).size() >= 2*FAULTY + 1
+    // pure val w = d.wave_number(b_proposer.reference.round)
+    // pure val blocks = d.get_decision_blocks(w)
+    // blocks.exists(block => d.is_cert(block, b_proposer) and d.block_store.link(block, b_anchor))
   }
 
   pure def try_direct_decide(d: DirectDecider, w: int): Decision = {
+    pure val block = q::debug("block", d.get_proposer_block(w))
+    pure val supporters = q::debug("supporters", q::debug("parents", d.block_store.parents(block)).filter(b => d.block_store.parents(b).size() >= 2*FAULTY + 1))
+    pure val supporting_edges = supporters.map(b1 => Set((block.reference, b1.reference)).union(d.block_store.parents(b1).map(b2 => (b1.reference, b2.reference)))).flatten()
     pure val status = if (d.skipped_proposer(w)) {
       Skip
+    } else if (supporters.size() >= 2*FAULTY + 1) {
+      Commit
     } else {
-      pure val b_proposer = d.supported_proposer(w)
-      match b_proposer {
-        | None => Undecided
-        | Some(_) => Commit
-      }
+      Undecided
     }
-    pure val block = d.get_proposer_block(w)
-    { status: status, block: block.reference, log: DirectDecision }
+    { status: status, block: block.reference, log: DirectDecision(supporting_edges) }
   }
 
   pure def try_indirect_decide(d: DirectDecider, w: int, sequence: List[Decision]): Decision = {
@@ -264,6 +266,8 @@ module mysticeti_c {
     result' = [],
   }
 
+
+  // L1d should be indirect
   action step = all {
     round_to_process >= 0,
     validator_to_process >= 0,

@@ -39,15 +39,15 @@ pub enum ProposerSlotState {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct StatementBlock {
-    reference: BlockReference,
-    includes: Vec<BlockReference>,
+    pub reference: BlockReference,
+    pub includes: Vec<BlockReference>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "tag", content = "value")]
 pub enum Log {
     IncompleteWave,
-    DirectDecision,
+    DirectDecision(Vec<(BlockReference, BlockReference)>),
     IndirectDecision(BlockReference),
     Error,
     UnableToDecide,
@@ -85,6 +85,22 @@ fn color_from_status(status: ProposerSlotState) -> ratatui::prelude::Color {
     }
 }
 
+fn show_log(log: Log) -> String {
+    match log {
+        Log::IncompleteWave => "IncompleteWave".to_string(),
+        Log::DirectDecision(es) => format!(
+            "DirectDecision, supporting edges: {:?}",
+            es.into_iter()
+                .map(|(a, b)| format!("({} - {})", a.label, b.label))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ),
+        Log::IndirectDecision(anchor) => format!("IndirectDecision, anchor: {:?}", anchor.label),
+        Log::Error => "Error".to_string(),
+        Log::UnableToDecide => "UnableToDecide".to_string(),
+    }
+}
+
 fn draw_dag(f: &mut ratatui::Frame, state: &State) {
     let chunks = Layout::default()
         .constraints(vec![Constraint::Percentage(100)])
@@ -98,12 +114,31 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
 
             for include in &block.includes {
                 let (ix, iy) = coordinates(include.authority.clone(), include.round.clone());
+
+                // Color certified edges in green
+                let color = state
+                    .result
+                    .first()
+                    .and_then(|r| match r.log {
+                        Log::DirectDecision(ref edges) => {
+                            if edges.iter().any(|(a, b)| {
+                                (*a == *include && *b == block.reference)
+                                    || (*a == block.reference && *b == *include)
+                            }) {
+                                Some(Color::Green)
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(Color::Blue);
                 edges.push(Line {
                     x1: ix,
                     y1: iy,
                     x2: x,
                     y2: y,
-                    color: Color::Blue,
+                    color,
                 });
             }
         });
@@ -123,8 +158,10 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
                     18.0,
                     Span::styled(
                         format!(
-                            "{:?}: {:?} {:?}",
-                            last_result.block.label, last_result.log, last_result.status
+                            "{:?}: {:?} {}",
+                            last_result.block.label,
+                            last_result.status,
+                            show_log(last_result.log.clone()),
                         ),
                         Style::default().fg(color_from_status(last_result.status.clone())),
                     ),
