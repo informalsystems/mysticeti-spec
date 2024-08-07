@@ -43,12 +43,20 @@ pub struct StatementBlock {
     pub includes: Vec<BlockReference>,
 }
 
+pub type Edge = (String, String);
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct IndirectDecisionFields {
+    pub anchor: String,
+    pub edges: Vec<Edge>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "tag", content = "value")]
 pub enum Log {
     IncompleteWave,
-    DirectDecision(Vec<(BlockReference, BlockReference)>),
-    IndirectDecision(BlockReference),
+    DirectDecision(Vec<Edge>),
+    IndirectDecision(IndirectDecisionFields),
     Error,
     UnableToDecide,
 }
@@ -91,11 +99,13 @@ fn show_log(log: Log) -> String {
         Log::DirectDecision(es) => format!(
             "DirectDecision, supporting edges: {:?}",
             es.into_iter()
-                .map(|(a, b)| format!("({} - {})", a.label, b.label))
+                .map(|(a, b)| format!("({a} <- {b})"))
                 .collect::<Vec<String>>()
                 .join(", ")
         ),
-        Log::IndirectDecision(anchor) => format!("IndirectDecision, anchor: {:?}", anchor.label),
+        Log::IndirectDecision(IndirectDecisionFields { anchor, edges }) => {
+            format!("IndirectDecision, anchor: {anchor}, edges: {edges:?}")
+        }
         Log::Error => "Error".to_string(),
         Log::UnableToDecide => "UnableToDecide".to_string(),
     }
@@ -119,17 +129,28 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
                 let color = state
                     .result
                     .first()
-                    .and_then(|r| match r.log {
+                    .and_then(|r| match r.log.clone() {
                         Log::DirectDecision(ref edges) => {
                             if edges.iter().any(|(a, b)| {
-                                (*a == *include && *b == block.reference)
-                                    || (*a == block.reference && *b == *include)
+                                (*a == *include.label && *b == block.reference.label)
+                                    || (*a == block.reference.label && *b == *include.label)
                             }) {
                                 Some(Color::Green)
                             } else {
                                 None
                             }
                         }
+                        Log::IndirectDecision(IndirectDecisionFields { edges, .. }) => {
+                            if edges.clone().iter().any(|(a, b)| {
+                                (*a == *include.label && *b == block.reference.label)
+                                    || (*a == block.reference.label && *b == *include.label)
+                            }) {
+                                Some(Color::Green)
+                            } else {
+                                None
+                            }
+                        }
+
                         _ => None,
                     })
                     .unwrap_or(Color::Blue);

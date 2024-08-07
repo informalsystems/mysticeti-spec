@@ -9,7 +9,8 @@ module mysticeti_c {
 
   type ProposerSlotState = Commit | Skip | Undecided
   type Decision = { status: ProposerSlotState, block: BlockReference, log: Log }
-  type Log = IncompleteWave | DirectDecision(Set[(BlockReference, BlockReference)]) | IndirectDecision(BlockReference) | Error | UnableToDecide
+  type Edge = (str, str)
+  type Log = IncompleteWave | DirectDecision(Set[Edge]) | IndirectDecision({ anchor: str, edges: Set[Edge] }) | Error | UnableToDecide
 
   type BlockReference = { authority: int, round: Round, label: str, leader_rank: int }
   type StatementBlock = { reference: BlockReference, includes: Set[BlockReference] }
@@ -76,12 +77,32 @@ module mysticeti_c {
   }
 
   pure def link(store: BlockStore, later_block: StatementBlock, earlier_block: StatementBlock): bool = {
-    val linked_to_earlier = range(earlier_block.reference.round + 1, later_block.reference.round + 1).foldl(Set(earlier_block), (parents, r) => {
+    val linked_to_earlier = range(earlier_block.reference.round + 1, later_block.reference.round + 1).foldl(Set(earlier_block), (linked_blocks, r) => {
       val blocks = store.blocks_by_round(r)
-      parents.union(blocks.filter(block => parents.exists(parent => block.includes.contains(parent.reference))))
+      linked_blocks.union(blocks.filter(block => linked_blocks.exists(b => block.includes.contains(b.reference))))
     })
 
     linked_to_earlier.contains(later_block)
+  }
+
+  pure def last(v: List[a]): a = {
+    v[v.length() - 1]
+  }
+
+  pure def link_edges(store: BlockStore, later_block: StatementBlock, earlier_block: StatementBlock): Set[Edge] = {
+    val chains = range(earlier_block.reference.round + 1, later_block.reference.round + 1).foldl(Set([earlier_block]), (links, r) => {
+      val blocks = store.blocks_by_round(r)
+      links.map(l => {
+        val linked_blocks = blocks.filter(block => block.includes.contains(l.last().reference))
+        linked_blocks.map(b => l.append(b))
+      }).flatten()
+    }).filter(c => c.last() == later_block)
+
+    chains.map(c => range(0, c.length() - 1).foldl(Set(), (edges, i) => {
+      val child = c[i]
+      val parent = c[i + 1]
+      edges.union(Set((child.reference.label, parent.reference.label)))
+    })).flatten()
   }
 
   pure def direct_decider(block_store: BlockStore, wave_length: int, round_offset: int, proposer_offset: int): DirectDecider = {
@@ -99,12 +120,6 @@ module mysticeti_c {
   pure def decision_round(d: DirectDecider, w: int): int = {
     w * d.wave_length + d.wave_length - 1 + d.round_offset - 1
   }
-
-  // FIXME: I don't understand what this should be from the paper
-  // pure def get_predefined_proposer(d: DirectDecider, w: int): Validator = {
-  //   pure val r_proposer = d.proposer_round(w)
-  //   VALIDATORS[r_proposer % NUM_OF_PROPOSERS]
-  // }
 
   pure def block_by_reference(d: DirectDecider, reference: BlockReference): StatementBlock = {
     d.block_store.blocks.get(reference.round).get(reference.authority)
@@ -149,29 +164,24 @@ module mysticeti_c {
     non_supporters.size() >= 2*FAULTY + 1
   }
 
-  // pure def supported_proposer(d: DirectDecider, w: int): Option[StatementBlock] = {
-  //   pure val b_proposer = d.get_proposer_block(w)
-  //   pure val blocks = d.block_store.parents(b_proposer)
-  //   pure val supporters = blocks.filter(block => d.is_cert(block, b_proposer))
-  //   if (supporters.size() >= 2*FAULTY + 1) {
-  //     Some(b_proposer)
-  //   } else {
-  //     None
-  //   }
-  // }
+  pure def edge(b1: StatementBlock, b2: StatementBlock): Edge = {
+    (b1.reference.label, b2.reference.label)
+  }
 
   // I have three parents that are linked to the anchor
-  pure def certified_link(d: DirectDecider, b_anchor: StatementBlock, b_proposer: StatementBlock): bool = {
-    d.block_store.parents(b_proposer).filter(b => d.block_store.link(b_anchor, b)).size() >= 2*FAULTY + 1
-    // pure val w = d.wave_number(b_proposer.reference.round)
-    // pure val blocks = d.get_decision_blocks(w)
-    // blocks.exists(block => d.is_cert(block, b_proposer) and d.block_store.link(block, b_anchor))
+  pure def certified_link(d: DirectDecider, b_anchor: StatementBlock, b_proposer: StatementBlock): { patterns: int, edges: Set[Edge] } = {
+    pure val parents_with_link = d.block_store.parents(b_proposer).filter(b => d.block_store.link(b_anchor, b))
+    pure val edges = parents_with_link.map(b => {
+      Set(edge(b_proposer, b)).union(d.block_store.link_edges(b_anchor, b))
+    }).flatten()
+
+    { patterns: parents_with_link.size(), edges: edges }
   }
 
   pure def try_direct_decide(d: DirectDecider, w: int): Decision = {
     pure val block = q::debug("block", d.get_proposer_block(w))
     pure val supporters = q::debug("supporters", q::debug("parents", d.block_store.parents(block)).filter(b => d.block_store.parents(b).size() >= 2*FAULTY + 1))
-    pure val supporting_edges = supporters.map(b1 => Set((block.reference, b1.reference)).union(d.block_store.parents(b1).map(b2 => (b1.reference, b2.reference)))).flatten()
+    pure val supporting_edges = supporters.map(b1 => Set(edge(block, b1)).union(d.block_store.parents(b1).map(b2 => edge(b1, b2)))).flatten()
     pure val status = if (d.skipped_proposer(w)) {
       Skip
     } else if (supporters.size() >= 2*FAULTY + 1) {
@@ -195,15 +205,16 @@ module mysticeti_c {
         res
       } else {
         match a.status {
-          | Undecided => Some({ status: Undecided, block: b_proposer.reference, log: IndirectDecision(a.block) })
+          | Undecided => Some({ status: Undecided, block: b_proposer.reference, log: IndirectDecision({ anchor: a.block.label, edges: Set() }) })
           | Commit => {
             pure val b_anchor = d.block_by_reference(a.block)
-            pure val status = if (d.certified_link(b_anchor, b_proposer)) {
+            pure val certified_link_result = d.certified_link(b_anchor, b_proposer)
+            pure val status = if (certified_link_result.patterns >= 2*FAULTY + 1) {
               Commit
             } else {
               Skip
             }
-            Some({ status: status, block: b_proposer.reference, log: IndirectDecision(b_anchor.reference) })
+            Some({ status: status, block: b_proposer.reference, log: IndirectDecision({ anchor: b_anchor.reference.label, edges: certified_link_result.edges }) })
           }
           | Skip => res
         }
@@ -266,8 +277,6 @@ module mysticeti_c {
     result' = [],
   }
 
-
-  // L1d should be indirect
   action step = all {
     round_to_process >= 0,
     validator_to_process >= 0,
