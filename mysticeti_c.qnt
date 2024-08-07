@@ -159,12 +159,15 @@ module mysticeti_c {
   }
 
   pure def try_direct_decide(d: DirectDecider, w: int): Decision = {
-    pure val block = q::debug("block", d.get_proposer_block(w))
-    pure val supporters = q::debug("supporters", q::debug("parents", d.block_store.parents(block)).filter(b => d.block_store.parents(b).size() >= 2*FAULTY + 1))
-    pure val supporting_edges = supporters.map(b1 => Set(edge(block, b1)).union(d.block_store.parents(b1).map(b2 => edge(b1, b2)))).flatten()
+    pure val block = d.get_proposer_block(w)
+    // certificates are in r + 2
+    pure val certificates = d.block_store.parents(block).map(b =>
+      d.block_store.parents(b).filter(c => c.includes.filter(b2 => d.block_by_reference(b2).includes.contains(block.reference)).size() >= 2*FAULTY + 1)
+    ).flatten()
+    pure val supporting_edges = certificates.map(c => d.block_store.link_edges(c, block)).flatten()
     pure val status = if (d.skipped_proposer(w)) {
       Skip
-    } else if (supporters.size() >= 2*FAULTY + 1) {
+    } else if (certificates.size() >= 2*FAULTY + 1) {
       Commit
     } else {
       Undecided
