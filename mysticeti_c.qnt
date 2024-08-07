@@ -117,10 +117,6 @@ module mysticeti_c {
     w * d.wave_length + d.round_offset
   }
 
-  pure def decision_round(d: DirectDecider, w: int): int = {
-    w * d.wave_length + d.wave_length - 1 + d.round_offset - 1
-  }
-
   pure def block_by_reference(d: DirectDecider, reference: BlockReference): StatementBlock = {
     d.block_store.blocks.get(reference.round).get(reference.authority)
   }
@@ -137,22 +133,6 @@ module mysticeti_c {
   pure def get_first_voting_blocks(d: DirectDecider, w: int): Set[StatementBlock] = {
     pure val r_voting = d.proposer_round(w) + 1
     d.block_store.blocks_by_round(r_voting)
-  }
-
-  pure def get_decision_blocks(d: DirectDecider, w: int): Set[StatementBlock] = {
-    pure val r_decision = d.decision_round(w)
-    d.block_store.blocks_by_round(r_decision)
-  }
-
-  pure def is_vote(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
-    // The paper describes this as a DFS search starting from block, but from
-    // the overall explanation, I can't understand why it is not simply a check
-    // for the existence of a link between the blocks
-    d.block_store.link(block, proposer_block)
-  }
-
-  pure def is_cert(d: DirectDecider, block: StatementBlock, proposer_block: StatementBlock): bool = {
-    d.block_store.parents(block).filter(b => d.is_vote(b, proposer_block)).size() >= 2*FAULTY + 1
   }
 
   pure def skipped_proposer(d: DirectDecider, w: int): bool = {
@@ -291,4 +271,102 @@ module mysticeti_c {
     round_to_process' = if (validator_to_process == 0) round_to_process - 1 else round_to_process,
     validator_to_process' = if (validator_to_process == 0) NUM_OF_PROPOSERS - 1 else validator_to_process - 1,
   }
+
+  pure def is_direct(l: Log): bool = {
+    match l {
+      | DirectDecision(_) => true
+      | _ => false
+    }
+  }
+
+  pure def is_indirect(l: Log): bool = {
+    match l {
+      | IndirectDecision(_) => true
+      | _ => false
+    }
+  }
+
+  pure def anchor(l: Log): Option[str] = {
+    match l {
+      | IndirectDecision(r) => Some(r.anchor)
+      | _ => None
+    }
+  }
+
+  run paperTest = init.then(24.reps((_) => step)).then(
+    val decision_by_block = result.foldl(Map(), (m, decision) => {
+      m.put(decision.block.label, decision)
+    })
+    all {
+      // Rounds 5 and 6 are part of an incomplete wave and therefore undecided
+      assert(decision_by_block.get("L6d").status == Undecided),
+      assert(decision_by_block.get("L6d").log == IncompleteWave),
+      // ...
+      assert(decision_by_block.get("L5a").status == Undecided),
+      assert(decision_by_block.get("L5a").log == IncompleteWave),
+
+      // L4d, L4c and L4b are marked as commit by the direct decision rule
+      assert(decision_by_block.get("L4d").status == Commit),
+      assert(decision_by_block.get("L4d").log.is_direct()),
+      assert(decision_by_block.get("L4c").status == Commit),
+      assert(decision_by_block.get("L4c").log.is_direct()),
+      assert(decision_by_block.get("L4b").status == Commit),
+      assert(decision_by_block.get("L4b").log.is_direct()),
+
+      // L4a is marked as skip by the direct decision rule
+      assert(decision_by_block.get("L4a").status == Skip),
+      assert(decision_by_block.get("L4a").log.is_direct()),
+
+      // Continuing with L3d, L3c, L3b, and L2d, the direct decision rule
+      // categorizes them all as to-commit, similar to L4d, L4c, L4b
+      assert(decision_by_block.get("L3d").status == Commit),
+      assert(decision_by_block.get("L3d").log.is_direct()),
+      assert(decision_by_block.get("L3c").status == Commit),
+      assert(decision_by_block.get("L3c").log.is_direct()),
+      assert(decision_by_block.get("L3b").status == Commit),
+      assert(decision_by_block.get("L3b").log.is_direct()),
+      assert(decision_by_block.get("L2d").status == Commit),
+      assert(decision_by_block.get("L2d").log.is_direct()),
+
+      // L2c and L2b cannot be classified with direct decision, so indirect
+      // decision rule is used. The anchor is L5a, which is undecided.
+      // Therefore, the status is undecided.
+      assert(decision_by_block.get("L2c").status == Undecided),
+      assert(decision_by_block.get("L2c").log.is_indirect()),
+      assert(decision_by_block.get("L2c").log.anchor() == Some("L5a")),
+      assert(decision_by_block.get("L2b").status == Undecided),
+      assert(decision_by_block.get("L2b").log.is_indirect()),
+      assert(decision_by_block.get("L2b").log.anchor() == Some("L5a")),
+
+      // L2a is a direct decision on commit
+      assert(decision_by_block.get("L2a").status == Commit),
+      assert(decision_by_block.get("L2a").log.is_direct()),
+
+      // L1d and L1c need indirect decision, and the anchor is L4b, which is
+      // marked as Commit
+      assert(decision_by_block.get("L1d").status == Commit),
+      assert(decision_by_block.get("L1d").log.is_indirect()),
+      assert(decision_by_block.get("L1d").log.anchor() == Some("L4b")),
+      assert(decision_by_block.get("L1c").status == Commit),
+      assert(decision_by_block.get("L1c").log.is_indirect()),
+      assert(decision_by_block.get("L1c").log.anchor() == Some("L4b")),
+
+      // NOTE: description on paper seems wrong here (Appendix A) as it says
+      // anchor is L4a.
+      // L1b also needs indirect decision with anchor L4b, but
+      // there is no certified link between it and the anchor, so it gets marked
+      // as Skip
+      assert(decision_by_block.get("L1b").status == Skip),
+      assert(decision_by_block.get("L1b").log.is_indirect()),
+      assert(decision_by_block.get("L1b").log.anchor() == Some("L4b")),
+
+      // L1a is a direct decision on commit
+      assert(decision_by_block.get("L1a").status == Commit),
+      assert(decision_by_block.get("L1a").log.is_direct()),
+
+      round_to_process' = round_to_process,
+      validator_to_process' = validator_to_process,
+      block_store' = block_store,
+      result' = result,
+    })
 }
