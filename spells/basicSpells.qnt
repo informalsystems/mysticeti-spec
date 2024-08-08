@@ -7,6 +7,7 @@ module basicSpells {
   type Option[a] = Some(a) | None
 
   pure def find(s, f) = s.fold(None, (a, i) => if (f(i)) Some(i) else a)
+  pure def find_first(l, f) = l.foldl(None, (a, i) => if (a == None and f(i)) Some(i) else a)
 
   /// An annotation for writing preconditions.
   /// - @param __cond condition to check

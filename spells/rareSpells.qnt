@@ -90,6 +90,16 @@ module rareSpells {
       __set.fold(List(), (__l, __e) => __l.sortedListInsert(__e, __cmp))
   }
 
+  pure def sortList(list: List[a], cmp: (a, a) => Ordering): List[a] = {
+    list.foldl(List(), (l, e) => l.sortedListInsert(e, cmp))
+  }
+
+  run sortListTest = all {
+    assert(sortList([ 5, 1, 3 ], intCompare) == [ 1, 3, 5 ]),
+    assert(sortList([ 1, 5, 1, 3, 5 ], intCompare)  == [ 1, 1, 3, 5, 5 ]),
+  }
+
+
   //// Returns a set of the elements in the list.
   ////
   //// - @param __list a list
