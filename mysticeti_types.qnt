@@ -1,0 +1,43 @@
+// -*- mode: Bluespec; -*-
+module mysticeti_types {
+  import basicSpells.* from "./spells/basicSpells"
+
+  type ProposerSlotState = Commit | Skip | Undecided
+  type Decision = { status: ProposerSlotState, block: BlockReference, log: Log }
+  type Edge = (str, str)
+  type Log = IncompleteWave | DirectDecision(Set[Edge]) | IndirectDecision({ anchor: str, edges: Set[Edge] }) | Error | UnableToDecide
+
+  type BlockReference = { authority: int, round: int, label: str, leader_rank: int }
+  type StatementBlock = { reference: BlockReference, children: Set[BlockReference] }
+
+  // Map from round to validator to block
+  type BlockStore = int -> int -> StatementBlock
+
+  /* Basic DAG functionality */
+
+  pure def parents_of(blocks: BlockStore, block: StatementBlock): Set[StatementBlock] = {
+    pure val potential_parents = blocks.by_round(block.reference.round + 1)
+    potential_parents.filter(parent => parent.children.contains(block.reference))
+  }
+
+  pure def is_link(blocks: BlockStore, later_block: StatementBlock, earlier_block: StatementBlock): bool = {
+    val linked_to_earlier = range(earlier_block.reference.round + 1, later_block.reference.round + 1).foldl(Set(earlier_block), (linked_blocks, r) => {
+      val r_blocks = blocks.by_round(r)
+      linked_blocks.union(r_blocks.filter(block => linked_blocks.exists(b => block.children.contains(b.reference))))
+    })
+
+    linked_to_earlier.contains(later_block)
+  }
+
+  pure def by_reference(blocks: BlockStore, reference: BlockReference): StatementBlock = {
+    blocks.get(reference.round).get(reference.authority)
+  }
+
+  pure def by_round(blocks: BlockStore, round: int): Set[StatementBlock] = {
+    blocks.getOrElse(round, Map()).values()
+  }
+
+  pure def edge(b1: StatementBlock, b2: StatementBlock): Edge = {
+    (b1.reference.label, b2.reference.label)
+  }
+}
