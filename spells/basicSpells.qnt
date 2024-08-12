@@ -207,4 +207,8 @@ module basicSpells {
   run takeWhileTest = all {
     assert(take_while([1, 5, 4, 3], (x) => x % 2 == 1) == [1, 5]),
   }
+
+  pure def prefix_of(l1: List[a], l2: List[b]): bool = {
+    l1.indices().forall(i => l1[i] == l2[i])
+  }
 }

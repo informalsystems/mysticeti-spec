@@ -157,4 +157,36 @@ module mysticeti_paper_test {
       decisions' = decisions,
       blocks_to_commit' = blocks_to_commit,
     })
+
+    // Lemma 7. All correct validators commit a consistent sequence of proposer
+    // blocks (i.e., the committed proposer sequence of one correct validator is
+    // a prefix of another’s).
+    // TODO: write as invariant over a model for a changing DAG
+    run lemma7Test = {
+      nondet a1 = 0.to(NUM_OF_PROPOSERS - 1).oneOf()
+      nondet a2 = 0.to(NUM_OF_PROPOSERS - 1).exclude(Set(a1)).oneOf()
+      nondet r1 = 0.to(NUM_OF_PROPOSERS - 1).oneOf()
+      nondet r2 = 0.to(NUM_OF_PROPOSERS - 1).exclude(Set(r1)).oneOf()
+      nondet children1 = blocks.get(5).values().map(b => b.reference).powerset().oneOf()
+      nondet children2 = blocks.get(5).values().map(b => b.reference).powerset().oneOf()
+      val block1: StatementBlock = { reference: { round: 6, authority: a1, label: "new1", leader_rank: r1 }, children: children1 }
+      val block2: StatementBlock = { reference: { round: 6, authority: a2, label: "new2", leader_rank: r2 }, children: children2 }
+      init_with_dag.then(all {
+        val b1 = blocks.put(6, Map(a1 -> block1))
+        val d1 = commit_order(try_decide_all(b1))
+
+        val b2 = blocks.put(6, Map(a2 -> block2))
+        val d2 = commit_order(try_decide_all(b2))
+
+        val b3 = blocks.put(6, Map(a1 -> block1, a2 -> block2))
+        val d3 = commit_order(try_decide_all(b3))
+        all {
+          assert(d1.prefix_of(d3)),
+          assert(d2.prefix_of(d3)),
+        },
+        blocks' = blocks,
+        decisions' = decisions,
+        blocks_to_commit' = blocks_to_commit,
+    })
+  }
 }
