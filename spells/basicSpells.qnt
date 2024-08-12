@@ -171,4 +171,40 @@ module basicSpells {
     assert(empty(Set(1, 2)) == false),
     assert(empty(Set(Set())) == false),
   }
+
+  pure def listMap(l: List[a], f: (a) => b): List[b] = {
+    range(0, l.length()).foldl([], (acc, i) => {
+      acc.append(f(l[i]))
+    })
+  }
+
+  pure def last(v: List[a]): a = {
+    v[v.length() - 1]
+  }
+
+  pure def decreasing_range(start: int, end: int): List[int] = {
+    range(end, start + 1).foldl([], (acc, i) => {
+      List(i).concat(acc)
+    })
+  }
+
+  run decreasingRangeTest = all {
+    assert(decreasing_range(5, 1) == [5, 4, 3, 2, 1]),
+  }
+
+  pure def take_while(l: List[a], cond: (a) => bool): List[a] = {
+    pure val result = l.foldl(([], true), (acc, e) => {
+      if (acc._2 and cond(e)) {
+        (acc._1.append(e), true)
+      } else {
+        (acc._1, false)
+      }
+    })
+
+    result._1
+  }
+
+  run takeWhileTest = all {
+    assert(take_while([1, 5, 4, 3], (x) => x % 2 == 1) == [1, 5]),
+  }
 }

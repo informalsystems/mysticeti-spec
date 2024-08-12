@@ -84,7 +84,7 @@ module mysticeti_c {
     }
   }
 
-  pure def try_decide(blocks: BlockStore, sequence: List[Decision], round: int, authority: int): List[Decision] = {
+  pure def try_decide_one(blocks: BlockStore, sequence: List[Decision], round: int, authority: int): List[Decision] = {
     pure val proposer_block = blocks.get(round).get(authority)
     pure val highest_round = blocks.keys().fold(0, (highest, element) => if (element > highest) element else highest)
 
@@ -102,48 +102,45 @@ module mysticeti_c {
       // Add the new decision to the head of the decision sequence
       ([decision].concat(sequence))
     }
+  }
 
-    // FIXME: Move this to step so it is only done after all iterations of try_decide
-    // if (l == 0) {
-    //   pure val result = status_sequence.foldl(([], false), (acc, status) => {
-    //     // TODO: write a take while spell or something
-    //     if (status.status == Undecided or acc._2) {
-    //       (acc._1, true)
-    //     } else {
-    //       ((acc._1).append(status), false)
-    //     }
-    //   })
+  pure def try_decide_all(blocks: BlockStore): List[Decision] = {
+    pure val highest_round = blocks.keys().fold(0, (highest, element) => if (element > highest) element else highest)
 
-    //   result._1
-    // } else {
-    //   status_sequence
-    // }
+    // FIXME: we don't have to run all the way to round 0 if there are commited rounds
+    decreasing_range(highest_round, 0).foldl([], (sequence, round) => {
+      decreasing_range(NUM_OF_PROPOSERS - 1, 0).foldl(sequence, (sequence, proposer) => {
+        // We know the proposer index, but this refers to the leader rank. Find the authority for this rank.
+        match blocks.get(round).values().find(b => b.reference.leader_rank == proposer) {
+           | None => sequence
+           | Some(block) => {
+              try_decide_one(blocks, sequence, block.reference.round, block.reference.authority)
+           }
+         }
+      })
+    })
+  }
+
+  pure def commit_order(decisions: List[Decision]): List[BlockReference] = {
+    decisions.take_while(decision => decision.status != Undecided).select(decision => decision.status == Commit).listMap(decision => decision.block)
   }
 
   var blocks: BlockStore
-  var result: List[Decision]
-  var round_to_process: int
-  var validator_to_process: int
+  var decisions: List[Decision]
+  var blocks_to_commit: List[BlockReference]
 
   action init = all {
     blocks' = Map(),
-    round_to_process' = 5,
-    validator_to_process' = NUM_OF_PROPOSERS - 1,
-    result' = [],
+    decisions' = [],
+    blocks_to_commit' = [],
   }
 
-  action step = all {
-    round_to_process >= 0,
-    validator_to_process >= 0,
-    blocks' = blocks,
-    val new_result = match blocks.get(round_to_process).values().find(b => b.reference.leader_rank == validator_to_process) {
-      | None => result
-      | Some(block) => {
-         try_decide(blocks, result, block.reference.round, block.reference.authority)
-      }
+  action step = {
+    val new_decisions = try_decide_all(blocks)
+    all {
+      blocks' = blocks,
+      decisions' = new_decisions,
+      blocks_to_commit' = commit_order(new_decisions),
     }
-    result' = new_result,
-    round_to_process' = if (validator_to_process == 0) round_to_process - 1 else round_to_process,
-    validator_to_process' = if (validator_to_process == 0) NUM_OF_PROPOSERS - 1 else validator_to_process - 1,
   }
- }
+}

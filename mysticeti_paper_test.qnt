@@ -75,16 +75,18 @@ module mysticeti_paper_test {
 
   action init_with_dag = all {
     blocks' = DAG.fold(Map(), (m, block) => if (m.has(block.reference.round)) m.setBy(block.reference.round, row => row.put(block.reference.authority, block)) else m.put(block.reference.round, Map(block.reference.authority -> block))),
-    round_to_process' = 5,
-    validator_to_process' = NUM_OF_PROPOSERS - 1,
-    result' = [],
+    decisions' = [],
+    blocks_to_commit' = [],
   }
 
-  run paperTest = init_with_dag.then(24.reps((_) => step)).then(
-    val decision_by_block = result.foldl(Map(), (m, decision) => {
+  run paperTest = init_with_dag.then(step).then(
+    val decision_by_block = decisions.foldl(Map(), (m, decision) => {
       m.put(decision.block.label, decision)
     })
     all {
+      // The resulting commit sequence is L1a, L1c, L1d, L2a
+      assert(blocks_to_commit.listMap(b => b.label) == ["L1a", "L1c", "L1d", "L2a"]),
+
       // Rounds 5 and 6 are part of an incomplete wave and therefore undecided
       assert(decision_by_block.get("L6d").status == Undecided),
       assert(decision_by_block.get("L6d").log == IncompleteWave),
@@ -151,9 +153,8 @@ module mysticeti_paper_test {
       assert(decision_by_block.get("L1a").status == Commit),
       assert(decision_by_block.get("L1a").log.is_direct()),
 
-      round_to_process' = round_to_process,
-      validator_to_process' = validator_to_process,
       blocks' = blocks,
-      result' = result,
+      decisions' = decisions,
+      blocks_to_commit' = blocks_to_commit,
     })
 }
