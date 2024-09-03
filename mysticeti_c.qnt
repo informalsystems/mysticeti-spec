@@ -17,25 +17,26 @@ module mysticeti_c {
     pure val r_proposer = proposer_block.reference.round
     pure val next_round_blocks = blocks.by_round(r_proposer + 1)
 
-    pure val non_supporters = next_round_blocks.filter(block => not(block.children.exists(child => child == proposer_block.reference)))
+    pure val non_supporters = next_round_blocks.filter(block => not(block.parents.exists(parent => parent == proposer_block.reference)))
     non_supporters.size() >= 2*FAULTY + 1
   }
 
   pure def has_certified_link(blocks: BlockStore, b_anchor: StatementBlock, b_proposer: StatementBlock): bool = {
-    // The block has 2F + 1 parents that are linked to the anchor
-    pure val parents_with_link = blocks.parents_of(b_proposer).filter(b => blocks.is_link(b_anchor, b))
+    // The block has 2F + 1 children that are linked to the anchor
+    pure val children_with_link = blocks.children_of(b_proposer).filter(b => blocks.is_link(b_anchor, b))
+    // FIXME: This should actually be a certificate "grandparent"
 
-    parents_with_link.size() >= 2*FAULTY + 1
+    children_with_link.size() >= 2*FAULTY + 1
   }
 
   pure def try_direct_decide(blocks: BlockStore, proposer_block: StatementBlock): Decision = {
-    // A certificate for a block in round r will be in r + 2, so we fetch the parents of the parents of the proposer_block
-    pure val potential_certificates = blocks.parents_of(proposer_block).map(b => blocks.parents_of(b)).flatten()
+    // A certificate for a block in round r will be in r + 2, so we fetch the children of the children of the proposer_block
+    pure val potential_certificates = blocks.children_of(proposer_block).map(b => blocks.children_of(b)).flatten()
 
     pure val certificates = potential_certificates.filter(c => {
-      // A certificate should have at least 2F + 1 children that support (link to) the proposer block.
-      pure val children_supporting_proposer = c.children.filter(b => blocks.by_reference(b).children.contains(proposer_block.reference))
-      children_supporting_proposer.size() >= 2*FAULTY + 1
+      // A certificate should have at least 2F + 1 parents that support (link to) the proposer block.
+      pure val parents_supporting_proposer = c.parents.filter(b => blocks.by_reference(b).parents.contains(proposer_block.reference))
+      parents_supporting_proposer.size() >= 2*FAULTY + 1
     })
 
     pure val status = if (should_skip(blocks, proposer_block)) {
@@ -51,7 +52,7 @@ module mysticeti_c {
 
   pure def try_indirect_decide(blocks: BlockStore, sequence: List[Decision], proposer_block: StatementBlock): Decision = {
     // The anchor will always be in the first round of the next wave
-    pure val anchor_round = proposer_block.reference.round + 3
+    pure val anchor_round = proposer_block.reference.round + 3 // we probably need to consider next rounds as well - blocks that are not there yet are undecided.
     pure val potential_anchors = sequence
                                    .select(s => s.block.round == anchor_round)
                                    // Anchors are sorted by their leadership rank
@@ -110,6 +111,8 @@ module mysticeti_c {
     // FIXME: we don't have to run all the way to round 0 if there are commited rounds
     decreasing_range(highest_round, 0).foldl([], (sequence, round) => {
       decreasing_range(NUM_OF_PROPOSERS - 1, 0).foldl(sequence, (sequence, proposer) => {
+        // There can be more than one block for (round, proposer)
+
         // We know the proposer index, but this refers to the leader rank. Find the authority for this rank.
         match blocks.get(round).values().find(b => b.reference.leader_rank == proposer) {
            | None => sequence

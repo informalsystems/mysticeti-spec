@@ -28,28 +28,28 @@ module mysticeti_paper_test {
   pure val L6d = { authority: 2, round: 5, label: "L6d", leader_rank: 3 }
 
   pure val DAG = Set(
-    { reference: L1a, children: Set() },
-    { reference: L1b, children: Set() },
-    { reference: L1c, children: Set() },
-    { reference: L1d, children: Set() },
-    { reference: L2d, children: Set(L1a, L1b, L1c) },
-    { reference: L2a, children: Set(L1a, L1b, L1d) },
-    { reference: L2b, children: Set(L1a, L1c, L1d) },
-    { reference: L2c, children: Set(L1a, L1c, L1d) },
-    { reference: L3c, children: Set(L2d, L2a, L2b) },
-    { reference: L3d, children: Set(L2d, L2a, L2c) },
-    { reference: L3b, children: Set(L2d, L2a, L2b, L2c) },
-    { reference: L4d, children: Set(L3c, L3d, L3b) },
-    { reference: L4a, children: Set(L3c, L3d, L3b) },
-    { reference: L4b, children: Set(L3c, L3d, L3b) },
-    { reference: L4c, children: Set(L3c, L3d, L3b) },
-    { reference: L5c, children: Set(L4d, L4b, L4c) },
-    { reference: L5d, children: Set(L4d, L4a, L4b, L4c) },
-    { reference: L5a, children: Set(L4d, L4b, L4c) },
-    { reference: L5b, children: Set(L4d, L4b, L4c) },
-    { reference: L6b, children: Set(L5c, L5d, L5a, L5b) },
-    { reference: L6c, children: Set(L5d, L5a, L5b) },
-    { reference: L6d, children: Set(L5d, L5a, L5b) }
+    { reference: L1a, parents: Set() },
+    { reference: L1b, parents: Set() },
+    { reference: L1c, parents: Set() },
+    { reference: L1d, parents: Set() },
+    { reference: L2d, parents: Set(L1a, L1b, L1c) },
+    { reference: L2a, parents: Set(L1a, L1b, L1d) },
+    { reference: L2b, parents: Set(L1a, L1c, L1d) },
+    { reference: L2c, parents: Set(L1a, L1c, L1d) },
+    { reference: L3c, parents: Set(L2d, L2a, L2b) },
+    { reference: L3d, parents: Set(L2d, L2a, L2c) },
+    { reference: L3b, parents: Set(L2d, L2a, L2b, L2c) },
+    { reference: L4d, parents: Set(L3c, L3d, L3b) },
+    { reference: L4a, parents: Set(L3c, L3d, L3b) },
+    { reference: L4b, parents: Set(L3c, L3d, L3b) },
+    { reference: L4c, parents: Set(L3c, L3d, L3b) },
+    { reference: L5c, parents: Set(L4d, L4b, L4c) },
+    { reference: L5d, parents: Set(L4d, L4a, L4b, L4c) },
+    { reference: L5a, parents: Set(L4d, L4b, L4c) },
+    { reference: L5b, parents: Set(L4d, L4b, L4c) },
+    { reference: L6b, parents: Set(L5c, L5d, L5a, L5b) },
+    { reference: L6c, parents: Set(L5d, L5a, L5b) },
+    { reference: L6d, parents: Set(L5d, L5a, L5b) }
   )
 
   pure def is_direct(l: Log): bool = {
@@ -74,6 +74,7 @@ module mysticeti_paper_test {
   }
 
   action init_with_dag = all {
+  // Equivocation: we can have multiple blocks from same round/author
     blocks' = DAG.fold(Map(), (m, block) => if (m.has(block.reference.round)) m.setBy(block.reference.round, row => row.put(block.reference.authority, block)) else m.put(block.reference.round, Map(block.reference.authority -> block))),
     decisions' = [],
     blocks_to_commit' = [],
@@ -167,10 +168,10 @@ module mysticeti_paper_test {
       nondet a2 = 0.to(NUM_OF_PROPOSERS - 1).exclude(Set(a1)).oneOf()
       nondet r1 = 0.to(NUM_OF_PROPOSERS - 1).oneOf()
       nondet r2 = 0.to(NUM_OF_PROPOSERS - 1).exclude(Set(r1)).oneOf()
-      nondet children1 = blocks.get(5).values().map(b => b.reference).powerset().oneOf()
-      nondet children2 = blocks.get(5).values().map(b => b.reference).powerset().oneOf()
-      val block1: StatementBlock = { reference: { round: 6, authority: a1, label: "new1", leader_rank: r1 }, children: children1 }
-      val block2: StatementBlock = { reference: { round: 6, authority: a2, label: "new2", leader_rank: r2 }, children: children2 }
+      nondet parents1 = blocks.get(5).values().map(b => b.reference).powerset().oneOf()
+      nondet parents2 = blocks.get(5).values().map(b => b.reference).powerset().oneOf()
+      val block1: StatementBlock = { reference: { round: 6, authority: a1, label: "new1", leader_rank: r1 }, parents: parents1 }
+      val block2: StatementBlock = { reference: { round: 6, authority: a2, label: "new2", leader_rank: r2 }, parents: parents2 }
       init_with_dag.then(all {
         val b1 = blocks.put(6, Map(a1 -> block1))
         val d1 = commit_order(try_decide_all(b1))
