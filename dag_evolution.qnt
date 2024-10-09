@@ -1,3 +1,5 @@
+// -*- mode: Bluespec; -*-
+
 module dag_evolution {
   import basicSpells.* from "./spells/basicSpells"
 
