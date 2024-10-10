@@ -10,7 +10,10 @@ module dag_evolution {
 
   pure val NUM_OF_PROPOSERS = 4
   pure val FAULTY = 1
-  pure val CORRECT = Set(0, 1, 2)
+  // pure val CORRECT = Set(0, 1, 2)
+  // pure val NODES = CORRECT.union(Set(3))
+  pure val CORRECT = Set(0, 1, 2, 3)
+  pure val NODES = CORRECT
 
   pure def can_add(dag: DAG, block: StatementBlock): bool = {
     pure val b_round = block.reference.round
@@ -67,35 +70,68 @@ module dag_evolution {
 
   pure def send_correct_message(states: int -> NodeState, block: StatementBlock): int -> NodeState = {
     states.keys().fold(states, (acc, authority) => {
-      if (authority == block.reference.authority)
-        acc
-      else
-        acc.setBy(authority, s => { ...s, incoming_messages: s.incoming_messages.union(Set(block)) })
+      acc.setBy(authority, s => { ...s, incoming_messages: s.incoming_messages.union(Set(block)) })
     })
   }
 
   pure def send_byzantine_message(states: int -> NodeState, blocks: Set[StatementBlock]): int -> NodeState = {
     // TODO: good luck
+    Map()
   }
 
   action new_round(node: NodeState): bool = all {
-    if (GST) {
+    node.current_round == 0 or if (GST) {
       stabilized(node.dag, node.current_round)
     } else {
       has_enough_certificates(node.dag, node.current_round)
     },
     val updated_nodes = nodes.setBy(node.authority, n => { ...n, current_round: node.current_round + 1 })
     if (CORRECT.contains(node.authority))
-      val new_block = Set().oneOf() // TODO
+      val new_block = {
+        reference: { authority: node.authority, round: node.current_round + 1, index: 0 },
+        parents: node.dag.filter(b => b.reference.round == node.current_round).map(b => b.reference)
+      }
       nodes' = send_correct_message(updated_nodes, new_block)
-        .setBy(node.authority, n => { ...n, dag: node.dag.union(Set(new_block)) }),
+        // .setBy(node.authority, n => { ...n, dag: node.dag.union(Set(new_block)) })
     else
       nondet byzantine_blocks = Set().oneOf() // TODO
       nodes' = send_byzantine_message(updated_nodes, byzantine_blocks)
   }
 
-  // action step = any {
-  //   consume_backlog,
-  //   receive_block,
-  // }
+  action init = all {
+    nodes' = NODES.mapBy(n => {
+      authority: n,
+      dag: Set(),
+      backlog: Set(),
+      current_round: 0,
+      incoming_messages: Set()
+    }),
+    GST' = false,
+  }
+
+  action step = {
+    nondet node = nodes.values().oneOf()
+    any {
+      all {
+        any {
+          new_round(node),
+          all {
+            node.incoming_messages != Set(),
+            nondet block = node.incoming_messages.oneOf()
+            nodes' = nodes
+              .set(node.authority, { ...receive_block(node, block), incoming_messages: node.incoming_messages.exclude(Set(block)) })
+              .setBy(node.authority, n => consume_backlog(n))
+          }
+        },
+        GST' = GST,
+      },
+      all {
+        GST == false,
+        nodes' = nodes,
+        GST' = true
+      },
+    }
+  }
+
+  val inv = nodes.values().forall(n => not(n.dag.exists(b => b.reference.round > 5)))
 }
