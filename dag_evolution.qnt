@@ -8,33 +8,12 @@ module dag_evolution {
 
   type DAG = Set[StatementBlock]
 
-  pure val NUM_OF_PROPOSERS = 4
-  pure val FAULTY = 1
-  // pure val CORRECT = Set(0, 1, 2)
-  // pure val NODES = CORRECT.union(Set(3))
-  pure val CORRECT = Set(0, 1, 2, 3)
-  pure val NODES = CORRECT
-
-  pure def can_add(dag: DAG, block: StatementBlock): bool = {
-    pure val b_round = block.reference.round
-    if (b_round == 0) {
-      true
-    } else {
-      pure val block_references_from_previous_round = dag.filter(b => b.reference.round == b_round - 1).map(b => b.reference)
-      block.parents.subseteq(block_references_from_previous_round)
-    }
-  }
-
-  // we can assume that our own block is always included
-  pure def has_enough_certificates(dag: DAG, round: int): bool = {
-    dag.filter(b => b.reference.round == round).size() >= 2*FAULTY + 1
-  }
-
-  pure def stabilized(dag: DAG, round: int): bool = {
-    CORRECT.subseteq(
-      dag.filter(b => b.reference.round == round).map(b => b.reference.authority)
-    )
-  }
+  pure val NUM_NODES = 4
+  pure val NUM_FAULTY = 1
+  pure val CORRECT = Set(0, 1, 2)
+  pure val NODES = CORRECT.union(Set(3))
+  //pure val CORRECT = Set(0, 1, 2, 3)
+  //pure val NODES = CORRECT
 
   type NodeState = {
     authority: int,
@@ -46,6 +25,26 @@ module dag_evolution {
 
   var nodes: int -> NodeState
   var GST: bool
+
+  pure def can_add(dag: DAG, block: StatementBlock): bool = {
+    pure val b_round = block.reference.round
+    if (b_round == 0) {
+      true
+    } else {
+      pure val block_references_from_previous_round = dag.filter(b => b.reference.round == b_round - 1).map(b => b.reference)
+      block.parents.subseteq(block_references_from_previous_round)
+    }
+  }
+
+  pure def has_enough_certificates(dag: DAG, round: int): bool = {
+    dag.filter(b => b.reference.round == round).size() >= 2*NUM_FAULTY + 1
+  }
+
+  pure def stabilized(dag: DAG, round: int): bool = {
+    CORRECT.subseteq(
+      dag.filter(b => b.reference.round == round).map(b => b.reference.authority)
+    )
+  }
 
   pure def receive_block(node: NodeState, block: StatementBlock): NodeState = {
     if (can_add(node.dag, block)) {
@@ -74,9 +73,27 @@ module dag_evolution {
     })
   }
 
-  pure def send_byzantine_message(states: int -> NodeState, blocks: Set[StatementBlock]): int -> NodeState = {
-    // TODO: good luck
-    Map()
+  pure def send_byzantine_message(states: int -> NodeState, block: StatementBlock, random: int -> int, dropslinks: int -> bool, dropsall: int -> bool): int -> NodeState = {
+    states.keys().fold(states, (acc, auth) => {
+      if (dropsall.get(auth)) {
+        //drop whole message
+        acc        
+      } else if (dropslinks.get(auth)) {
+        // parent list dropped, messages potentially corrupted
+        pure val byzblock = {
+          reference: { authority: block.reference.authority, round: block.reference.round, index: random.get(auth)},
+          parents: Set()
+        }
+        acc.setBy(auth, s => { ...s, incoming_messages: s.incoming_messages.union(Set(byzblock)) })     
+      } else {
+        // parent list dropped, messages potentially corrupted, 0 means correct
+        pure val byzblock = {
+          reference: { authority: block.reference.authority, round: block.reference.round, index: random.get(auth) },
+          parents: block.parents
+        }
+        acc.setBy(auth, s => { ...s, incoming_messages: s.incoming_messages.union(Set(byzblock)) })     
+      }
+    })
   }
 
   action new_round(node: NodeState): bool = all {
@@ -86,16 +103,19 @@ module dag_evolution {
       has_enough_certificates(node.dag, node.current_round)
     },
     val updated_nodes = nodes.setBy(node.authority, n => { ...n, current_round: node.current_round + 1 })
-    if (CORRECT.contains(node.authority))
-      val new_block = {
+    val new_block = {
         reference: { authority: node.authority, round: node.current_round + 1, index: 0 },
         parents: node.dag.filter(b => b.reference.round == node.current_round).map(b => b.reference)
-      }
+    }
+    if (CORRECT.contains(node.authority))
+
       nodes' = send_correct_message(updated_nodes, new_block)
         // .setBy(node.authority, n => { ...n, dag: node.dag.union(Set(new_block)) })
     else
-      nondet byzantine_blocks = Set().oneOf() // TODO
-      nodes' = send_byzantine_message(updated_nodes, byzantine_blocks)
+      nondet random = NODES.setOfMaps(Set(0,1,2,3)).oneOf() 
+      nondet dropslinks = NODES.setOfMaps(Set(true,false)).oneOf()
+      nondet dropsall = NODES.setOfMaps(Set(true,false)).oneOf()
+      nodes' = send_byzantine_message(updated_nodes, new_block, random, dropslinks, dropsall)
   }
 
   action init = all {
