@@ -56,9 +56,9 @@ module mysticeti_c {
     pure val potential_anchors = sequence
                                    .select(s => s.block.round == anchor_round)
                                    // Anchors are sorted by their leadership rank
-                                   .sortList((a, b) => intCompare(a.block.leader_rank, b.block.leader_rank))
+                                   .sortList((a, b) => a.block.leader_rank < b.block.leader_rank)
 
-    pure val chosen_anchor = potential_anchors.find_first(decision => decision.status == Undecided or decision.status == Commit)
+    pure val chosen_anchor = potential_anchors.findFirst(decision => decision.status == Undecided or decision.status == Commit)
 
     match chosen_anchor {
       | None => { status: Undecided, block: proposer_block.reference, log: UnableToDecide }
@@ -109,8 +109,8 @@ module mysticeti_c {
     pure val highest_round = blocks.keys().fold(0, (highest, element) => if (element > highest) element else highest)
 
     // FIXME: we don't have to run all the way to round 0 if there are commited rounds
-    decreasing_range(highest_round, 0).foldl([], (sequence, round) => {
-      decreasing_range(NUM_OF_PROPOSERS - 1, 0).foldl(sequence, (sequence, proposer) => {
+    decreasingRange(highest_round, 0).foldl([], (sequence, round) => {
+      decreasingRange(NUM_OF_PROPOSERS - 1, 0).foldl(sequence, (sequence, proposer) => {
         // There can be more than one block for (round, proposer)
 
         // We know the proposer index, but this refers to the leader rank. Find the authority for this rank.
@@ -125,7 +125,7 @@ module mysticeti_c {
   }
 
   pure def commit_order(decisions: List[Decision]): List[BlockReference] = {
-    decisions.take_while(decision => decision.status != Undecided).select(decision => decision.status == Commit).listMap(decision => decision.block)
+    decisions.takeWhile(decision => decision.status != Undecided).select(decision => decision.status == Commit).listMap(decision => decision.block)
   }
 
   var blocks: BlockStore
