@@ -21,10 +21,11 @@ module mysticeti_types {
   }
 
   pure def is_link(blocks: BlockStore, later_block: StatementBlock, earlier_block: StatementBlock): bool = {
-    val linked_to_earlier = range(earlier_block.reference.round + 1, later_block.reference.round + 1).foldl(Set(earlier_block), (linked_blocks, r) => {
-      val r_blocks = blocks.by_round(r)
-      linked_blocks.union(r_blocks.filter(block => linked_blocks.exists(b => block.parents.contains(b.reference))))
-    })
+    val linked_to_earlier = range(earlier_block.reference.round + 1, later_block.reference.round + 1)
+      .foldl(Set(earlier_block), (linked_blocks, r) => {
+        val r_blocks = blocks.by_round(r)
+        linked_blocks.union(r_blocks.filter(block => linked_blocks.exists(b => block.parents.contains(b.reference))))
+      })
 
     linked_to_earlier.contains(later_block)
   }

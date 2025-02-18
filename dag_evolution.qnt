@@ -12,8 +12,6 @@ module dag_evolution {
   pure val NUM_FAULTY = 1
   pure val CORRECT = Set(0, 1, 2)
   pure val NODES = CORRECT.union(Set(3))
-  //pure val CORRECT = Set(0, 1, 2, 3)
-  //pure val NODES = CORRECT
 
   type NodeState = {
     authority: int,
@@ -73,12 +71,18 @@ module dag_evolution {
     })
   }
 
-  pure def send_byzantine_message(states: int -> NodeState, block: StatementBlock, random: int -> int, dropslinks: int -> bool, dropsall: int -> bool): int -> NodeState = {
+  pure def send_byzantine_message(
+    states: int -> NodeState,
+    block: StatementBlock,
+    random: int -> int,
+    drops_links: int -> bool,
+    drops_all: int -> bool
+  ): int -> NodeState = {
     states.keys().fold(states, (acc, auth) => {
-      if (dropsall.get(auth)) {
-        //drop whole message
+      if (drops_all.get(auth)) {
+        // drop whole message
         acc        
-      } else if (dropslinks.get(auth)) {
+      } else if (drops_links.get(auth)) {
         // parent list dropped, messages potentially corrupted
         pure val byzblock = {
           reference: { authority: block.reference.authority, round: block.reference.round, index: random.get(auth)},
@@ -108,14 +112,12 @@ module dag_evolution {
         parents: node.dag.filter(b => b.reference.round == node.current_round).map(b => b.reference)
     }
     if (CORRECT.contains(node.authority))
-
       nodes' = send_correct_message(updated_nodes, new_block)
-        // .setBy(node.authority, n => { ...n, dag: node.dag.union(Set(new_block)) })
     else
       nondet random = NODES.setOfMaps(Set(0,1,2,3)).oneOf() 
-      nondet dropslinks = NODES.setOfMaps(Set(true,false)).oneOf()
-      nondet dropsall = NODES.setOfMaps(Set(true,false)).oneOf()
-      nodes' = send_byzantine_message(updated_nodes, new_block, random, dropslinks, dropsall)
+      nondet drops_links = NODES.setOfMaps(Set(true,false)).oneOf()
+      nondet drops_all = NODES.setOfMaps(Set(true,false)).oneOf()
+      nodes' = send_byzantine_message(updated_nodes, new_block, random, drops_links, drops_all)
   }
 
   action init = all {

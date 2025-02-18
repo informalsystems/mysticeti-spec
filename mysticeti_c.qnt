@@ -52,13 +52,16 @@ module mysticeti_c {
 
   pure def try_indirect_decide(blocks: BlockStore, sequence: List[Decision], proposer_block: StatementBlock): Decision = {
     // The anchor will always be in the first round of the next wave
-    pure val anchor_round = proposer_block.reference.round + 3 // we probably need to consider next rounds as well - blocks that are not there yet are undecided.
+    pure val anchor_round = proposer_block.reference.round + 3
+    // FIXME: we probably need to consider next rounds as well - blocks that are not there yet are undecided.
     pure val potential_anchors = sequence
-                                   .select(s => s.block.round == anchor_round)
-                                   // Anchors are sorted by their leadership rank
-                                   .sortList((a, b) => a.block.leader_rank < b.block.leader_rank)
+      .select(s => s.block.round == anchor_round)
+      // Anchors are sorted by their leadership rank
+      .sortList((a, b) => a.block.leader_rank < b.block.leader_rank)
 
-    pure val chosen_anchor = potential_anchors.findFirst(decision => decision.status == Undecided or decision.status == Commit)
+    pure val chosen_anchor = potential_anchors.findFirst(decision => {
+      decision.status == Undecided or decision.status == Commit
+    })
 
     match chosen_anchor {
       | None => { status: Undecided, block: proposer_block.reference, log: UnableToDecide }
@@ -125,7 +128,10 @@ module mysticeti_c {
   }
 
   pure def commit_order(decisions: List[Decision]): List[BlockReference] = {
-    decisions.takeWhile(decision => decision.status != Undecided).select(decision => decision.status == Commit).listMap(decision => decision.block)
+    decisions
+      .takeWhile(decision => decision.status != Undecided)
+      .select(decision => decision.status == Commit)
+      .listMap(decision => decision.block)
   }
 
   var blocks: BlockStore
