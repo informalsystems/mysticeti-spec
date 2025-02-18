@@ -100,12 +100,16 @@ module dag_evolution {
     })
   }
 
-  action new_round(node: NodeState): bool = all {
+  def can_go_to_new_round(node: NodeState): bool = {
     node.current_round == 0 or if (GST) {
       stabilized(node.dag, node.current_round)
     } else {
       has_enough_certificates(node.dag, node.current_round)
-    },
+    }
+  }
+
+  action new_round(node: NodeState): bool = all {
+    can_go_to_new_round(node),
     val updated_nodes = nodes.setBy(node.authority, n => { ...n, current_round: node.current_round + 1 })
     val new_block = {
         reference: { authority: node.authority, round: node.current_round + 1, index: 0 },
@@ -131,27 +135,31 @@ module dag_evolution {
     GST' = false,
   }
 
+  val pending_nodes = nodes.values().filter(node => {
+    node.incoming_messages != Set() or (node.backlog != Set() and consume_backlog(node) != node)
+  })
+
+  val nodes_that_can_go_to_new_round = nodes.values().filter(can_go_to_new_round)
+
   action step = {
-    nondet node = nodes.values().oneOf()
-    any {
-      all {
-        any {
-          new_round(node),
-          all {
-            node.incoming_messages != Set(),
-            nondet block = node.incoming_messages.oneOf()
-            nodes' = nodes
-              .set(node.authority, { ...receive_block(node, block), incoming_messages: node.incoming_messages.exclude(Set(block)) })
-              .setBy(node.authority, n => consume_backlog(n))
-          }
-        },
-        GST' = GST,
+    if (pending_nodes != Set()) all {
+      nondet node = pending_nodes.oneOf()
+      if (node.incoming_messages != Set()) {
+        nondet block = node.incoming_messages.oneOf()
+        nodes' = nodes
+          .set(node.authority, { ...receive_block(node, block), incoming_messages: node.incoming_messages.exclude(Set(block)) })
+      } else {
+        nodes' = nodes.setBy(node.authority, n => consume_backlog(n))
       },
-      all {
-        GST == false,
-        nodes' = nodes,
-        GST' = true
-      },
+      GST' = GST,
+    } else if (nodes_that_can_go_to_new_round != Set()) all {
+      nondet node = nodes_that_can_go_to_new_round.oneOf()
+      new_round(node),
+      GST' = GST,
+    } else all {
+      GST == false,
+      nodes' = nodes,
+      GST' = true
     }
   }
 
