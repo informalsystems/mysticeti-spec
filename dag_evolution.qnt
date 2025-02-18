@@ -3,7 +3,7 @@
 module dag_evolution {
   import basicSpells.* from "./spells/basicSpells"
 
-  type BlockReference = { authority: int, round: int, index: int }
+  type BlockReference = { authority: int, round: int, index: int, leader_rank: int }
   type StatementBlock = { reference: BlockReference, parents: Set[BlockReference] }
 
   type DAG = Set[StatementBlock]
@@ -15,6 +15,7 @@ module dag_evolution {
 
   type NodeState = {
     authority: int,
+    leader_rank: int,
     dag: DAG,
     backlog: Set[StatementBlock],
     current_round: int,
@@ -85,14 +86,14 @@ module dag_evolution {
       } else if (drops_links.get(auth)) {
         // parent list dropped, messages potentially corrupted
         pure val byzblock = {
-          reference: { authority: block.reference.authority, round: block.reference.round, index: random.get(auth)},
+          reference: { ...block.reference, index: random.get(auth)},
           parents: Set()
         }
         acc.setBy(auth, s => { ...s, incoming_messages: s.incoming_messages.union(Set(byzblock)) })     
       } else {
         // parent list dropped, messages potentially corrupted, 0 means correct
         pure val byzblock = {
-          reference: { authority: block.reference.authority, round: block.reference.round, index: random.get(auth) },
+          reference: { ...block.reference, index: random.get(auth) },
           parents: block.parents
         }
         acc.setBy(auth, s => { ...s, incoming_messages: s.incoming_messages.union(Set(byzblock)) })     
@@ -112,7 +113,12 @@ module dag_evolution {
     can_go_to_new_round(node),
     val updated_nodes = nodes.setBy(node.authority, n => { ...n, current_round: node.current_round + 1 })
     val new_block = {
-        reference: { authority: node.authority, round: node.current_round + 1, index: 0 },
+        reference: {
+          authority: node.authority,
+          leader_rank: node.leader_rank,
+          round: node.current_round + 1,
+          index: 0,
+        },
         parents: node.dag.filter(b => b.reference.round == node.current_round).map(b => b.reference)
     }
     if (CORRECT.contains(node.authority))
@@ -127,6 +133,7 @@ module dag_evolution {
   action init = all {
     nodes' = NODES.mapBy(n => {
       authority: n,
+      leader_rank: n, // TODO pick leader every round
       dag: Set(),
       backlog: Set(),
       current_round: 0,
@@ -163,5 +170,5 @@ module dag_evolution {
     }
   }
 
-  val inv = nodes.values().forall(n => not(n.dag.exists(b => b.reference.round > 5)))
+  val witness = nodes.values().forall(n => not(n.dag.exists(b => b.reference.round > 5)))
 }

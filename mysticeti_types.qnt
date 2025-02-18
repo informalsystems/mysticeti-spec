@@ -41,4 +41,16 @@ module mysticeti_types {
   pure def edge(b1: StatementBlock, b2: StatementBlock): Edge = {
     (b1.reference.label, b2.reference.label)
   }
+
+  
+  // TODO: Equivocation: we can have multiple blocks from same round/author
+  pure def to_block_store(dag) = {
+    dag.fold(Map(), (m, block) => {
+      if (m.has(block.reference.round)) {
+        m.setBy(block.reference.round, row => row.put(block.reference.authority, block))
+      } else {
+        m.put(block.reference.round, Map(block.reference.authority -> block))
+      }
+    })
+  }
 }

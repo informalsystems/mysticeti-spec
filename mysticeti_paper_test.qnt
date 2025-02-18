@@ -74,15 +74,29 @@ module mysticeti_paper_test {
     }
   }
 
+
+  var blocks: BlockStore
+  var decisions: List[Decision]
+  var blocks_to_commit: List[BlockReference]
+
+  action init = all {
+    blocks' = Map(),
+    decisions' = [],
+    blocks_to_commit' = [],
+  }
+
+  action step = {
+    val new_decisions = try_decide_all(blocks)
+    all {
+      blocks' = blocks,
+      decisions' = new_decisions,
+      blocks_to_commit' = commit_order(new_decisions),
+    }
+  }
+
   action init_with_dag = all {
     // TODO: Equivocation: we can have multiple blocks from same round/author
-    blocks' = DAG.fold(Map(), (m, block) => {
-      if (m.has(block.reference.round)) {
-        m.setBy(block.reference.round, row => row.put(block.reference.authority, block))
-      } else {
-        m.put(block.reference.round, Map(block.reference.authority -> block))
-      }
-    }),
+    blocks' = DAG.to_block_store(),
     decisions' = [],
     blocks_to_commit' = [],
   }

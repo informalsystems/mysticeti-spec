@@ -117,7 +117,7 @@ module mysticeti_c {
         // There can be more than one block for (round, proposer)
 
         // We know the proposer index, but this refers to the leader rank. Find the authority for this rank.
-        match blocks.get(round).values().find(b => b.reference.leader_rank == proposer) {
+        match blocks.getOrElse(round, Map()).values().find(b => b.reference.leader_rank == proposer) {
            | None => sequence
            | Some(block) => {
               try_decide_one(blocks, sequence, block.reference.round, block.reference.authority)
@@ -132,24 +132,5 @@ module mysticeti_c {
       .takeWhile(decision => decision.status != Undecided)
       .select(decision => decision.status == Commit)
       .listMap(decision => decision.block)
-  }
-
-  var blocks: BlockStore
-  var decisions: List[Decision]
-  var blocks_to_commit: List[BlockReference]
-
-  action init = all {
-    blocks' = Map(),
-    decisions' = [],
-    blocks_to_commit' = [],
-  }
-
-  action step = {
-    val new_decisions = try_decide_all(blocks)
-    all {
-      blocks' = blocks,
-      decisions' = new_decisions,
-      blocks_to_commit' = commit_order(new_decisions),
-    }
   }
 }
