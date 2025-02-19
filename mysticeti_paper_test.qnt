@@ -183,7 +183,6 @@ module mysticeti_paper_test {
     // Lemma 7. All correct validators commit a consistent sequence of proposer
     // blocks (i.e., the committed proposer sequence of one correct validator is
     // a prefix of another’s).
-    // TODO: write as invariant over a model for a changing DAG
     run lemma7Test = {
       nondet a1 = 0.to(NUM_OF_PROPOSERS - 1).oneOf()
       nondet a2 = 0.to(NUM_OF_PROPOSERS - 1).exclude(Set(a1)).oneOf()
