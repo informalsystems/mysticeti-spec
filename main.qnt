@@ -35,7 +35,7 @@ module main {
   /// blocks (i.e., the committed proposer sequence of one correct validator is
   /// a prefix of another’s).
   val inv = {
-    // FIXME: This should only hold for correct validators.
+    // FIXME: This should only hold for correct validators, but here even the faulty ones are running the correct decision process
     val orders = dags_for_consensus.values().map(dag => commit_order(try_decide_all(dag.to_block_store())))
     tuples(orders, orders).forall(((order1, order2)) => order1.length() <= order2.length() implies order1.isPrefixOf(order2))
   }
