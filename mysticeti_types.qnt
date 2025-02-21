@@ -42,7 +42,6 @@ module mysticeti_types {
     (b1.reference.label, b2.reference.label)
   }
 
-  
   // TODO: Equivocation: we can have multiple blocks from same round/author
   pure def to_block_store(dag) = {
     dag.fold(Map(), (m, block) => {

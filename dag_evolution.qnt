@@ -3,7 +3,7 @@
 module dag_evolution {
   import basicSpells.* from "./spells/basicSpells"
 
-  type BlockReference = { authority: int, round: int, index: int, leader_rank: int }
+  type BlockReference = { authority: int, round: int, index: int }
   type StatementBlock = { reference: BlockReference, parents: Set[BlockReference] }
 
   type DAG = Set[StatementBlock]
@@ -15,7 +15,6 @@ module dag_evolution {
 
   type NodeState = {
     authority: int,
-    leader_rank: int,
     dag: DAG,
     backlog: Set[StatementBlock],
     current_round: int,
@@ -23,6 +22,8 @@ module dag_evolution {
   }
 
   var nodes: int -> NodeState
+  /// A map from each authority to its leader rank, for every round (roud = list index)
+  var leader_ranks: List[int -> int]
   var GST: bool
 
   pure def can_add(dag: DAG, block: StatementBlock): bool = {
@@ -115,30 +116,43 @@ module dag_evolution {
     val new_block = {
         reference: {
           authority: node.authority,
-          leader_rank: node.leader_rank,
           round: node.current_round + 1,
           index: 0,
         },
         parents: node.dag.filter(b => b.reference.round == node.current_round).map(b => b.reference)
     }
-    if (CORRECT.contains(node.authority))
-      nodes' = send_correct_message(updated_nodes, new_block)
-    else
-      nondet random = NODES.setOfMaps(Set(0,1,2,3)).oneOf() 
-      nondet drops_links = NODES.setOfMaps(Set(true,false)).oneOf()
-      nondet drops_all = NODES.setOfMaps(Set(true,false)).oneOf()
-      nodes' = send_byzantine_message(updated_nodes, new_block, random, drops_links, drops_all)
+    all {
+      if (new_block.reference.round > leader_ranks.length()) {
+        nondet new_leader_ranks = possible_leader_ranks.oneOf()
+        leader_ranks' = leader_ranks.append(new_leader_ranks)
+      } else {
+        leader_ranks' = leader_ranks
+      },
+      if (CORRECT.contains(node.authority))
+        nodes' = send_correct_message(updated_nodes, new_block)
+      else
+        nondet random = NODES.setOfMaps(Set(0,1,2,3)).oneOf() 
+        nondet drops_links = NODES.setOfMaps(Set(true,false)).oneOf()
+        nondet drops_all = NODES.setOfMaps(Set(true,false)).oneOf()
+        nodes' = send_byzantine_message(updated_nodes, new_block, random, drops_links, drops_all)
+    }
   }
+
+  /// A set of possible leader ranks for a round. That is, a maping from authorities to ranks,
+  /// where all ranks are different
+  pure val possible_leader_ranks =
+    NODES.setOfMaps(0.to(NODES.size())).filter(m => m.values().size() == NODES.size())
 
   action init = all {
     nodes' = NODES.mapBy(n => {
       authority: n,
-      leader_rank: n, // TODO pick leader every round
       dag: Set(),
       backlog: Set(),
       current_round: 0,
       incoming_messages: Set()
     }),
+    nondet leader_ranks_0 = possible_leader_ranks.oneOf()
+    leader_ranks' = [leader_ranks_0],
     GST' = false,
   }
 
@@ -158,6 +172,7 @@ module dag_evolution {
       } else {
         nodes' = nodes.setBy(node.authority, n => consume_backlog(n))
       },
+      leader_ranks' = leader_ranks,
       GST' = GST,
     } else if (nodes_that_can_go_to_new_round != Set()) all {
       nondet node = nodes_that_can_go_to_new_round.oneOf()
@@ -166,6 +181,7 @@ module dag_evolution {
     } else all {
       GST == false,
       nodes' = nodes,
+      leader_ranks' = leader_ranks,
       GST' = true
     }
   }

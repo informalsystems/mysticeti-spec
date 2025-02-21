@@ -1,8 +1,12 @@
 // -*- mode: Bluespec; -*-
 
-// This spec assumes wave lenght of three. Since there Quint doesn't allow
-// recursion, it would not be trivial to generalize it for any wave length.
-
+/**
+ * Functional Mysticeti consensus algorithm [1]
+ *
+ * [1]: https://arxiv.org/pdf/2310.14821
+ *
+ * Gabriela Moreira, Informal Systems, 2025
+ */
 module mysticeti_c {
   import basicSpells.* from "./spells/basicSpells"
   import rareSpells.* from "./spells/rareSpells"
@@ -13,6 +17,9 @@ module mysticeti_c {
   pure val NUM_OF_PROPOSERS = 4
   pure val FAULTY = 1
 
+  // This spec assumes wave lenght of three. Since there Quint doesn't allow
+  // recursion, it would not be trivial to generalize it for any wave length.
+  
   pure def should_skip(blocks: BlockStore, proposer_block: StatementBlock): bool = {
     pure val r_proposer = proposer_block.reference.round
     pure val next_round_blocks = blocks.by_round(r_proposer + 1)
@@ -108,6 +115,8 @@ module mysticeti_c {
     }
   }
 
+  /// Iterate from the highest round to the lowest, and from the last leader (proposer) to the first,
+  /// collecting potential decisions on whether thay should commit or skip blocks at that (round, leader).
   pure def try_decide_all(blocks: BlockStore): List[Decision] = {
     pure val highest_round = blocks.keys().fold(0, (highest, element) => if (element > highest) element else highest)
 
@@ -127,6 +136,8 @@ module mysticeti_c {
     })
   }
 
+  /// The final result of the algorithm a sequence of blocks to commit.
+  /// We take all the blocks marked as commit until we find an undecided block.
   pure def commit_order(decisions: List[Decision]): List[BlockReference] = {
     decisions
       .takeWhile(decision => decision.status != Undecided)

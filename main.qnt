@@ -14,12 +14,13 @@ module main {
 
   /// Function to convert a reference from the dag_evolution format to the mysticeti_c format
   /// by dropping the "index" and adding a "label"
-  pure def convert_reference(b) = {
+  def convert_reference(b) = {
       {
         authority: b.authority,
         round: b.round,
         label: "Generated",
-        leader_rank: b.leader_rank,
+        leader_rank: leader_ranks[b.round - 1].get(b.authority),
+        // we might need to add the index when we have equivocation
       }
   }
 
@@ -37,7 +38,7 @@ module main {
   val inv = {
     // FIXME: This should only hold for correct validators, but here even the faulty ones are running the correct decision process
     val orders = dags_for_consensus.values().map(dag => commit_order(try_decide_all(dag.to_block_store())))
-    tuples(orders, orders).forall(((order1, order2)) => order1.length() <= order2.length() implies order1.isPrefixOf(order2))
+    tuples(orders, orders).forall(((order1, order2)) => q::debug("order1", order1).length() <= q::debug("order2", order2).length() implies order1.isPrefixOf(order2))
   }
 }
 

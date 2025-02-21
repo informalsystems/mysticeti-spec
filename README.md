@@ -16,5 +16,6 @@ Other files:
 
 ## TODO
 - [ ] Model equivocation
-- [ ] Elect different leaders for different rounds
+- [x] Elect different leaders for different rounds
+- [ ] Subsets of leaders
 - [ ] Optimize `decide_all` so it doesn't run all the way to round 0 every time
