@@ -20,7 +20,7 @@ module mysticeti_types {
     potential_children.filter(child => child.parents.contains(block.reference))
   }
 
-  pure def is_link(blocks: BlockStore, later_block: StatementBlock, earlier_block: StatementBlock): bool = {
+  pure def is_link(blocks: BlockStore, earlier_block: StatementBlock, later_block: StatementBlock): bool = {
     val linked_to_earlier = range(earlier_block.reference.round + 1, later_block.reference.round + 1)
       .foldl(Set(earlier_block), (linked_blocks, r) => {
         val r_blocks = blocks.by_round(r)
@@ -42,6 +42,10 @@ module mysticeti_types {
     (b1.reference.label, b2.reference.label)
   }
 
+  pure def highest_round(blocks: BlockStore): int = {
+    blocks.keys().fold(0, (highest, element) => if (element > highest) element else highest)
+  }
+  
   // TODO: Equivocation: we can have multiple blocks from same round/author
   pure def to_block_store(dag) = {
     dag.fold(Map(), (m, block) => {

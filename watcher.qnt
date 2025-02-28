@@ -22,7 +22,7 @@ module watcher {
   }
 
   pure def certified_link_edges(blocks: BlockStore, b_anchor: StatementBlock, b_proposer: StatementBlock): Set[Edge] = {
-    pure val children_with_link = blocks.children_of(b_proposer).filter(b => blocks.is_link(b_anchor, b))
+    pure val children_with_link = blocks.children_of(b_proposer).filter(b => blocks.is_link(b, b_anchor))
     children_with_link.map(b => {
       Set(edge(b_proposer, b)).union(blocks.link_edges(b_anchor, b))
     }).flatten()
