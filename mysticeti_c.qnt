@@ -6,7 +6,7 @@
  *
  * [1]: https://arxiv.org/pdf/2310.14821
  *
- * Gabriela Moreira, Informal Systems, 2025
+ * Gabriela Moreira, Informal Systems, 2024-2025
  */
 module mysticeti_c {
   import basicSpells.* from "./spells/basicSpells"

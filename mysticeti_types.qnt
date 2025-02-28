@@ -1,4 +1,10 @@
 // -*- mode: Bluespec; -*-
+
+/**
+ * Types and basic functionality for the Mysticeti consensus algorithm in `mysticeti_c.qnt`
+ *
+ * Gabriela Moreira, Informal Systems, 2024
+ */
 module mysticeti_types {
   import basicSpells.* from "./spells/basicSpells"
 
@@ -43,7 +49,7 @@ module mysticeti_types {
   }
 
   pure def highest_round(blocks: BlockStore): int = {
-    blocks.keys().fold(0, (highest, element) => if (element > highest) element else highest)
+    blocks.keys().fold(0, max)
   }
   
   // TODO: Equivocation: we can have multiple blocks from same round/author

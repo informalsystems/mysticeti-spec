@@ -19,3 +19,4 @@ Other files:
 - [x] Elect different leaders for different rounds
 - [ ] Consider subsets of leaders (we only consider all validators being leaders with different ranks)
 - [ ] Optimize `decide_all` so it doesn't run all the way to round 0 every time
+- [ ] Define invariants from Lemmas 1-6

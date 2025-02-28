@@ -1,4 +1,5 @@
 // -*- mode: Bluespec; -*-
+
 /**
  * A module to check invariants of the Mysticeti consensus algorithm [1] over an evolving DAG
  *
@@ -9,7 +10,7 @@
 module main {
   import basicSpells.* from "spells/basicSpells"
   import dag_evolution.* from "dag_evolution"
-  import mysticeti_c.* from "mysticeti_c"
+  import mysticeti_c from "mysticeti_c"
   import mysticeti_types.to_block_store from "mysticeti_c"
 
   /// Function to convert a reference from the dag_evolution format to the mysticeti_c format
@@ -35,10 +36,15 @@ module main {
   /// Lemma 7. All correct validators commit a consistent sequence of proposer
   /// blocks (i.e., the committed proposer sequence of one correct validator is
   /// a prefix of another’s).
+  /// Theorem 1 (Total Order). MYSTICETI-C satisfies the total order property of
+  /// Byzantine Atomic Broadcast. Theorem 1 follows directly from Lemma 7.
   val inv = {
-    // FIXME: This should only hold for correct validators, but here even the faulty ones are running the correct decision process
-    val orders = dags_for_consensus.values().map(dag => commit_order(try_decide_all(dag.to_block_store())))
-    tuples(orders, orders).forall(((order1, order2)) => q::debug("order1", order1).length() <= q::debug("order2", order2).length() implies order1.isPrefixOf(order2))
+    val orders = dags_for_consensus.values().map(dag => {
+      mysticeti_c::commit_order(mysticeti_c::try_decide_all(dag.to_block_store()))
+    })
+    tuples(orders, orders).forall(((order1, order2)) => {
+      order1.length() <= order2.length() implies order1.isPrefixOf(order2)
+    })
   }
 }
 

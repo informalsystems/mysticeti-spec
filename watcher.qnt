@@ -1,6 +1,12 @@
 // -*- mode: Bluespec; -*-
 
-// This is not part of the core protocol. It only gathers information to add it to the trace
+/**
+ * Information gathering to help understand how a decision was taken.
+ *
+ * This is not part of the core protocol, it's just instrumentation.
+ *
+ * Gabriela Moreira, Informal Systems, 2024
+ */
 module watcher {
   import basicSpells.* from "./spells/basicSpells"
   import mysticeti_types.* from "./mysticeti_types"

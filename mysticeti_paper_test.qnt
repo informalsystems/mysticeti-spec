@@ -1,4 +1,12 @@
 // -*- mode: Bluespec; -*-
+
+/**
+ * A test describing the scenario presented in Appendix A on the Mysticeti paper [1] 
+ *
+ * [1]: https://arxiv.org/pdf/2310.14821
+ *
+ * Gabriela Moreira, Informal Systems, 2024
+ */
 module mysticeti_paper_test {
   import basicSpells.* from "./spells/basicSpells"
   import mysticeti_c.* from "./mysticeti_c"
@@ -95,7 +103,6 @@ module mysticeti_paper_test {
   }
 
   action init_with_dag = all {
-    // TODO: Equivocation: we can have multiple blocks from same round/author
     blocks' = DAG.to_block_store(),
     decisions' = [],
     blocks_to_commit' = [],
@@ -183,6 +190,7 @@ module mysticeti_paper_test {
     // Lemma 7. All correct validators commit a consistent sequence of proposer
     // blocks (i.e., the committed proposer sequence of one correct validator is
     // a prefix of another’s).
+    // We also check this lemma with an invariant. This is a weaker test over a much less general scenario.
     run lemma7Test = {
       nondet a1 = 0.to(NUM_OF_PROPOSERS - 1).oneOf()
       nondet a2 = 0.to(NUM_OF_PROPOSERS - 1).exclude(Set(a1)).oneOf()
