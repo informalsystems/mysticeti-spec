@@ -11,7 +11,7 @@ module mysticeti_types {
   type ProposerSlotState = Commit | Skip | Undecided
   type Decision = { status: ProposerSlotState, block: BlockReference, log: Log }
   type Edge = (str, str)
-  type Log = IncompleteWave | DirectDecision(Set[Edge]) | IndirectDecision({ anchor: str, edges: Set[Edge] }) | Error | UnableToDecide
+  type Log = IncompleteWave | DirectDecision({ certificate_blocks: Set[str], supporting_edges: Set[Edge] }) | IndirectDecision({ anchor: str, edges: Set[Edge] }) | Error | UnableToDecide
 
   type BlockReference = { authority: int, round: int, label: str, leader_rank: int }
   type StatementBlock = { reference: BlockReference, parents: Set[BlockReference] }

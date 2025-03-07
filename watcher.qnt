@@ -11,7 +11,9 @@ module watcher {
   import basicSpells.* from "./spells/basicSpells"
   import mysticeti_types.* from "./mysticeti_types"
 
-  pure def link_edges(blocks: BlockStore, later_block: StatementBlock, earlier_block: StatementBlock): Set[Edge] = {
+  val FAULTY = 1
+
+  pure def link_edges(blocks: BlockStore, earlier_block: StatementBlock, later_block: StatementBlock): Set[Edge] = {
     val chains = range(earlier_block.reference.round + 1, later_block.reference.round + 1).foldl(Set([earlier_block]), (links, r) => {
       val r_blocks = blocks.by_round(r)
       links.map(l => {
@@ -27,16 +29,65 @@ module watcher {
     })).flatten()
   }
 
-  pure def certified_link_edges(blocks: BlockStore, b_anchor: StatementBlock, b_proposer: StatementBlock): Set[Edge] = {
-    pure val children_with_link = blocks.children_of(b_proposer).filter(b => blocks.is_link(b, b_anchor))
-    children_with_link.map(b => {
-      Set(edge(b_proposer, b)).union(blocks.link_edges(b_anchor, b))
+  pure def certified_link_edges(
+    blocks: BlockStore,
+    anchor_block: StatementBlock,
+    proposer_block: StatementBlock
+  ): Set[Edge] = {
+    pure val potential_certified_links = blocks
+      .children_of(proposer_block)
+      .map(b => blocks.children_of(b))
+      .flatten()
+
+    potential_certified_links.filter(block => {
+      blocks.is_certificate(block, proposer_block) and blocks.is_link(block, anchor_block)
+    }).map(b => {
+      blocks.edges_from_certificate(b, proposer_block)
+        .union(blocks.link_edges(b, anchor_block))
     }).flatten()
   }
 
+  /// A certificate should have at least 2F + 1 parents that support (link to) the proposer block.
+  pure def is_certificate(
+    blocks: BlockStore,
+    certificate_block: StatementBlock,
+    proposer_block: StatementBlock
+  ): bool = {
+    pure val parents_supporting_proposer = certificate_block.parents.filter(b => {
+      blocks.by_reference(b).parents.contains(proposer_block.reference)
+    })
+
+    parents_supporting_proposer.size() >= 2*FAULTY + 1
+  }
+
+  pure def edges_from_certificate(blocks: BlockStore,
+    certificate_block: StatementBlock,
+    proposer_block: StatementBlock
+  ): Set[Edge] = {
+    pure val parents_supporting_proposer = certificate_block.parents.filter(b => {
+      blocks.by_reference(b).parents.contains(proposer_block.reference)
+    })
+    if (parents_supporting_proposer.size() >= 2*FAULTY + 1) {
+      pure val edges_to_add = parents_supporting_proposer.map(parent => {
+        Set(
+          (parent.label, certificate_block.reference.label),
+          (proposer_block.reference.label, parent.label),
+        )
+      }).flatten()
+      edges_to_add
+    } else {
+      Set()
+    }
+  }
+
   pure def log_direct_decision(blocks: BlockStore, proposer_block: StatementBlock, certificates: Set[StatementBlock]): Log = {
-    pure val supporting_edges = certificates.map(c => blocks.link_edges(c, proposer_block)).flatten()
-    DirectDecision(supporting_edges)
+    pure val supporting_edges: Set[Edge]= certificates.map(certificate_block => {
+      blocks.edges_from_certificate(certificate_block, proposer_block)
+    }).flatten()
+    DirectDecision({
+      certificate_blocks: certificates.map(b => b.reference.label),
+      supporting_edges: supporting_edges
+    })
   }
 
   pure def log_indirect_decision(blocks: BlockStore, proposer_block: StatementBlock, anchor: StatementBlock): Log = {

@@ -46,6 +46,12 @@ pub struct StatementBlock {
 pub type Edge = (String, String);
 
 #[derive(Clone, Debug, Deserialize)]
+pub struct DirectDecisionFields {
+    pub certificate_blocks: Vec<String>,
+    pub supporting_edges: Vec<Edge>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct IndirectDecisionFields {
     pub anchor: String,
     pub edges: Vec<Edge>,
@@ -55,7 +61,7 @@ pub struct IndirectDecisionFields {
 #[serde(tag = "tag", content = "value")]
 pub enum Log {
     IncompleteWave,
-    DirectDecision(Vec<Edge>),
+    DirectDecision(DirectDecisionFields),
     IndirectDecision(IndirectDecisionFields),
     Error,
     UnableToDecide,
@@ -93,13 +99,14 @@ fn color_from_status(status: ProposerSlotState) -> ratatui::prelude::Color {
 fn show_log(log: Log) -> String {
     match log {
         Log::IncompleteWave => "IncompleteWave".to_string(),
-        Log::DirectDecision(es) => format!(
-            "DirectDecision, supporting edges: {:?}",
-            es.into_iter()
-                .map(|(a, b)| format!("({a} <- {b})"))
-                .collect::<Vec<String>>()
-                .join(", ")
-        ),
+        Log::DirectDecision(DirectDecisionFields {
+            certificate_blocks, ..
+        }) => {
+            format!(
+                "DirectDecision, certificate blocks: {:?}",
+                certificate_blocks
+            )
+        }
         Log::IndirectDecision(IndirectDecisionFields { anchor, edges }) => {
             format!("IndirectDecision, anchor: {anchor}, edges: {edges:?}")
         }
@@ -124,8 +131,10 @@ fn draw_dag(f: &mut ratatui::Frame, blocks: &BlockStore, decisions: &[Decision])
 
                 // Color certified edges in green
                 let color = match decision.log.clone() {
-                    Log::DirectDecision(ref edges) => {
-                        if edges.iter().any(|(a, b)| {
+                    Log::DirectDecision(DirectDecisionFields {
+                        supporting_edges, ..
+                    }) => {
+                        if supporting_edges.iter().any(|(a, b)| {
                             (*a == *parent.label && *b == block.reference.label)
                                 || (*a == block.reference.label && *b == *parent.label)
                         }) {
