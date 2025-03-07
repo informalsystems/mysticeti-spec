@@ -40,7 +40,7 @@ pub enum ProposerSlotState {
 #[derive(Clone, Debug, Deserialize)]
 pub struct StatementBlock {
     pub reference: BlockReference,
-    pub includes: Vec<BlockReference>,
+    pub parents: Vec<BlockReference>,
 }
 
 pub type Edge = (String, String);
@@ -68,15 +68,12 @@ pub struct Decision {
     pub log: Log,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-pub struct BlockStore {
-    pub blocks: HashMap<BigInt, HashMap<BigInt, StatementBlock>>,
-}
+pub type BlockStore = HashMap<BigInt, HashMap<BigInt, StatementBlock>>;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct State {
-    pub result: Vec<Decision>,
-    pub block_store: BlockStore,
+    pub decisions: Vec<Decision>,
+    pub blocks: BlockStore,
 }
 
 fn coordinates(authority: BigInt, round: BigInt) -> (f64, f64) {
@@ -89,7 +86,7 @@ fn color_from_status(status: ProposerSlotState) -> ratatui::prelude::Color {
     match status {
         ProposerSlotState::Commit => Color::Green,
         ProposerSlotState::Skip => Color::Red,
-        ProposerSlotState::Undecided => Color::Gray,
+        ProposerSlotState::Undecided => Color::Blue,
     }
 }
 
@@ -111,49 +108,46 @@ fn show_log(log: Log) -> String {
     }
 }
 
-fn draw_dag(f: &mut ratatui::Frame, state: &State) {
+fn draw_dag(f: &mut ratatui::Frame, blocks: &BlockStore, decisions: &[Decision]) {
     let chunks = Layout::default()
         .constraints(vec![Constraint::Percentage(100)])
         .split(f.size());
 
     let mut edges: Vec<Line> = Vec::new();
-
-    state.block_store.blocks.iter().for_each(|(round, blocks)| {
+    let decision = decisions.last().unwrap();
+    blocks.iter().for_each(|(round, blocks)| {
         blocks.iter().for_each(|(authority, block)| {
             let (x, y) = coordinates(authority.clone(), round.clone());
 
-            for include in &block.includes {
-                let (ix, iy) = coordinates(include.authority.clone(), include.round.clone());
+            for parent in &block.parents {
+                let (ix, iy) = coordinates(parent.authority.clone(), parent.round.clone());
 
                 // Color certified edges in green
-                let color = state
-                    .result
-                    .first()
-                    .and_then(|r| match r.log.clone() {
-                        Log::DirectDecision(ref edges) => {
-                            if edges.iter().any(|(a, b)| {
-                                (*a == *include.label && *b == block.reference.label)
-                                    || (*a == block.reference.label && *b == *include.label)
-                            }) {
-                                Some(Color::Green)
-                            } else {
-                                None
-                            }
+                let color = match decision.log.clone() {
+                    Log::DirectDecision(ref edges) => {
+                        if edges.iter().any(|(a, b)| {
+                            (*a == *parent.label && *b == block.reference.label)
+                                || (*a == block.reference.label && *b == *parent.label)
+                        }) {
+                            Some(Color::Green)
+                        } else {
+                            None
                         }
-                        Log::IndirectDecision(IndirectDecisionFields { edges, .. }) => {
-                            if edges.clone().iter().any(|(a, b)| {
-                                (*a == *include.label && *b == block.reference.label)
-                                    || (*a == block.reference.label && *b == *include.label)
-                            }) {
-                                Some(Color::Green)
-                            } else {
-                                None
-                            }
+                    }
+                    Log::IndirectDecision(IndirectDecisionFields { edges, .. }) => {
+                        if edges.clone().iter().any(|(a, b)| {
+                            (*a == *parent.label && *b == block.reference.label)
+                                || (*a == block.reference.label && *b == *parent.label)
+                        }) {
+                            Some(Color::Green)
+                        } else {
+                            None
                         }
+                    }
 
-                        _ => None,
-                    })
-                    .unwrap_or(Color::Blue);
+                    _ => None,
+                }
+                .unwrap_or(Color::White);
                 edges.push(Line {
                     x1: ix,
                     y1: iy,
@@ -173,7 +167,7 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
                 ctx.draw(&edge);
             }
 
-            if let Some(last_result) = state.result.first() {
+            if let Some(last_result) = decisions.last() {
                 ctx.print(
                     15.0,
                     18.0,
@@ -190,10 +184,9 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
             }
 
             // Draw nodes
-            state.block_store.blocks.iter().for_each(|(round, blocks)| {
+            blocks.iter().for_each(|(round, blocks)| {
                 blocks.iter().for_each(|(authority, block)| {
-                    let color = state
-                        .result
+                    let color = decisions
                         .iter()
                         .find_map(|decision| {
                             if decision.block == block.reference {
@@ -203,6 +196,23 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
                             }
                         })
                         .unwrap_or(Color::Gray);
+
+                    if let Log::IndirectDecision(IndirectDecisionFields { anchor, .. }) =
+                        decision.log.clone()
+                    {
+                        if anchor == block.reference.label {
+                            // Changing color results in not being able to see the anchor's decision status
+                            // color = Color::Yellow;
+                            ctx.print(
+                                18.0,
+                                17.0,
+                                Span::styled(
+                                    format!("Anchor: {}", anchor),
+                                    Style::default().fg(color_from_status(decision.status.clone())),
+                                ),
+                            );
+                        }
+                    }
 
                     let (x, y) = coordinates(authority.clone(), round.clone());
                     ctx.draw(&Points {
@@ -225,6 +235,10 @@ fn draw_dag(f: &mut ratatui::Frame, state: &State) {
 }
 
 fn main() -> Result<(), io::Error> {
+    // load trace data
+    let data = include_str!("../../out.itf.json");
+    let trace: itf::Trace<State> = trace_from_str(data).unwrap();
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -232,14 +246,17 @@ fn main() -> Result<(), io::Error> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // load trace data
-    let data = include_str!("../../out.itf.json");
-    let trace: itf::Trace<State> = trace_from_str(data).unwrap();
+    let last_state = trace.states.last().expect("Can't find a state");
+    let blocks = &last_state.value.blocks;
+    let decisions: Vec<Decision> = last_state.value.decisions.iter().cloned().rev().collect();
 
     let mut i = 0;
-    let mut state = &trace.states[i].value;
     loop {
-        terminal.draw(|f| draw_dag(f, state))?;
+        if i >= decisions.len() {
+            return restore_terminal();
+        }
+
+        terminal.draw(|f| draw_dag(f, blocks, &decisions[0..=i]))?;
 
         if crossterm::event::poll(Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
@@ -247,11 +264,11 @@ fn main() -> Result<(), io::Error> {
                     KeyCode::Char('q') => return restore_terminal(),
                     KeyCode::Char('l') | KeyCode::Right => {
                         i += 1;
-                        state = &trace.states[i].value;
                     }
                     KeyCode::Char('h') | KeyCode::Left => {
-                        i -= 1;
-                        state = &trace.states[i].value;
+                        if i > 1 {
+                            i -= 1;
+                        }
                     }
                     _ => {}
                 }
