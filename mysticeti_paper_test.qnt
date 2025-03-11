@@ -1,9 +1,18 @@
 // -*- mode: Bluespec; -*-
+
+/**
+ * A test describing the scenario presented in Appendix A on the Mysticeti paper [1] 
+ *
+ * [1]: https://arxiv.org/pdf/2310.14821
+ *
+ * Gabriela Moreira, Informal Systems, 2024
+ */
 module mysticeti_paper_test {
   import basicSpells.* from "./spells/basicSpells"
   import mysticeti_c.* from "./mysticeti_c"
   import mysticeti_types.* from "./mysticeti_types"
 
+  // The paper labels nodes as L<round><rank> where ranks are "a" < "b" < "c" < "d"
   pure val L1a = { authority: 0, round: 0, label: "L1a", leader_rank: 0 }
   pure val L1b = { authority: 1, round: 0, label: "L1b", leader_rank: 1 }
   pure val L1c = { authority: 2, round: 0, label: "L1c", leader_rank: 2 }
@@ -73,9 +82,28 @@ module mysticeti_paper_test {
     }
   }
 
+
+  var blocks: BlockStore
+  var decisions: List[Decision]
+  var blocks_to_commit: List[BlockReference]
+
+  action init = all {
+    blocks' = Map(),
+    decisions' = [],
+    blocks_to_commit' = [],
+  }
+
+  action step = {
+    val new_decisions = try_decide_all(blocks)
+    all {
+      blocks' = blocks,
+      decisions' = new_decisions,
+      blocks_to_commit' = commit_order(new_decisions),
+    }
+  }
+
   action init_with_dag = all {
-  // Equivocation: we can have multiple blocks from same round/author
-    blocks' = DAG.fold(Map(), (m, block) => if (m.has(block.reference.round)) m.setBy(block.reference.round, row => row.put(block.reference.authority, block)) else m.put(block.reference.round, Map(block.reference.authority -> block))),
+    blocks' = DAG.to_block_store(),
     decisions' = [],
     blocks_to_commit' = [],
   }
@@ -142,7 +170,7 @@ module mysticeti_paper_test {
       assert(decision_by_block.get("L1c").log.anchor() == Some("L4b")),
 
       // NOTE: description on paper seems wrong here (Appendix A) as it says
-      // anchor is L4a.
+      // anchor is L4a, while the referred figure shows L4b as the anchor.
       // L1b also needs indirect decision with anchor L4b, but
       // there is no certified link between it and the anchor, so it gets marked
       // as Skip
@@ -162,7 +190,7 @@ module mysticeti_paper_test {
     // Lemma 7. All correct validators commit a consistent sequence of proposer
     // blocks (i.e., the committed proposer sequence of one correct validator is
     // a prefix of another’s).
-    // TODO: write as invariant over a model for a changing DAG
+    // We also check this lemma with an invariant. This is a weaker test over a much less general scenario.
     run lemma7Test = {
       nondet a1 = 0.to(NUM_OF_PROPOSERS - 1).oneOf()
       nondet a2 = 0.to(NUM_OF_PROPOSERS - 1).exclude(Set(a1)).oneOf()
@@ -172,6 +200,7 @@ module mysticeti_paper_test {
       nondet parents2 = blocks.get(5).values().map(b => b.reference).powerset().oneOf()
       val block1: StatementBlock = { reference: { round: 6, authority: a1, label: "new1", leader_rank: r1 }, parents: parents1 }
       val block2: StatementBlock = { reference: { round: 6, authority: a2, label: "new2", leader_rank: r2 }, parents: parents2 }
+
       init_with_dag.then(all {
         val b1 = blocks.put(6, Map(a1 -> block1))
         val d1 = commit_order(try_decide_all(b1))
@@ -182,8 +211,8 @@ module mysticeti_paper_test {
         val b3 = blocks.put(6, Map(a1 -> block1, a2 -> block2))
         val d3 = commit_order(try_decide_all(b3))
         all {
-          assert(d1.prefix_of(d3)),
-          assert(d2.prefix_of(d3)),
+          assert(d1.isPrefixOf(d3)),
+          assert(d2.isPrefixOf(d3)),
         },
         blocks' = blocks,
         decisions' = decisions,
