@@ -32,7 +32,8 @@ module dag_evolution {
   var nodes: int -> NodeState
   /// A map from each authority to its leader rank, for every round (roud = list index)
   var leader_ranks: List[int -> int]
-  var GST: bool
+  /// The round at which we reach Global Stabilization Time (GST)
+  var GST_round: int
 
   /// A node will only add a block to its DAG if all its parents are in the DAG already
   pure def can_add(dag: DAG, block: StatementBlock): bool = {
@@ -171,6 +172,8 @@ module dag_evolution {
     }
   }
 
+  val GST = nodes.values().forall(n => n.current_round >= GST_round)
+
   action init = all {
     nodes' = NODES.mapBy(n => {
       authority: n,
@@ -181,7 +184,8 @@ module dag_evolution {
     }),
     nondet leader_ranks_0 = possible_leader_ranks.oneOf()
     leader_ranks' = [leader_ranks_0],
-    GST' = false,
+    nondet round_GST = 1.to(5).oneOf()
+    GST_round' = round_GST,
   }
 
   val pending_nodes = nodes.values().filter(node => {
@@ -193,7 +197,7 @@ module dag_evolution {
   /// Follow a prioritization order to avoid having low odds to make progress.
   /// This is important since we require a high number of steps and the simulator
   /// gives up too easily if actions are not enabled.
-  action step = {
+  action step = all {
     if (pending_nodes != Set()) all {
       nondet node = pending_nodes.oneOf()
       if (node.incoming_messages != Set()) {
@@ -204,17 +208,15 @@ module dag_evolution {
         nodes' = nodes.setBy(node.authority, n => consume_backlog(n))
       },
       leader_ranks' = leader_ranks,
-      GST' = GST,
     } else if (nodes_that_can_go_to_new_round != Set()) all {
       nondet node = nodes_that_can_go_to_new_round.oneOf()
       new_round(node),
-      GST' = GST,
     } else all {
-      GST == false,
+      false,
       nodes' = nodes,
       leader_ranks' = leader_ranks,
-      GST' = true
-    }
+    },
+    GST_round' = GST_round,
   }
 
   /// Witness to check if we are progressing often enough
