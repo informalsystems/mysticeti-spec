@@ -35,7 +35,11 @@ useful to find issues with the model that are currently fixed. The following
 video is a visualization of the example from the paper:
 
 <video autoPlay
-src="https://github.com/user-attachments/assets/e57f269a-b74a-4abe-a0a6-aeac8dce2ed0"></video>
+src="https://github.com/user-attachments/assets/077a8965-5f1c-4121-8c7d-6ad49e59c260"></video>
+
+
+
+
 
 To reproduce it, go to the root of this repo and run:
 
