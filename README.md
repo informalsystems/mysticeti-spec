@@ -6,6 +6,9 @@ public talks. This was written as an exercise and should not be used to inform
 production-level usage of the protocol. It can be a valuable artifact if you are
 trying to learn it.
 
+Check out the blog post we wrote about this work: [Understanding 
+Mysticeti Consensus with Quint](https://informal.systems/blog/understanding-mysticeti-consensus-with-quint-2025).
+
 ## Files
 
 Main files:
