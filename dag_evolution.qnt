@@ -50,7 +50,7 @@ module dag_evolution {
   }
 
   /// Whether a block has received a sufficient number of blocks for a round.
-  /// Since we need 2F + 1 supporters on the oonsensus algorithm, the block needs to have
+  /// Since we need 2F + 1 supporters on the consensus algorithm, the block needs to have
   /// least that number of blocks to start processing a new round.
   pure def has_enough_blocks(dag: DAG, round: int): bool = {
     dag.filter(b => b.reference.round == round).size() >= 2 * FAULTY + 1
@@ -74,11 +74,11 @@ module dag_evolution {
 
   /// Receive blocks that couldn't be received before and were stored to the backlog
   pure def consume_backlog(node: NodeState): NodeState = {
-    pure val highest_round = node.dag.map(b => b.reference.round).fold(0, max)
+    pure val highest_backlog_round = node.backlog.map(b => b.reference.round).fold(0, max)
 
     // Incrementally add blocks, starting from lowest rounds
-    pure val new_dag = range(0, highest_round).foldl(node.dag, (updated_dag, r) => {
-      pure val to_add = updated_dag.filter(b => b.reference.round == r and can_add(node.dag, b))
+    pure val new_dag = range(0, highest_backlog_round + 1).foldl(node.dag, (updated_dag, r) => {
+      pure val to_add = node.backlog.filter(b => b.reference.round == r and can_add(updated_dag, b))
       updated_dag.union(to_add)
     })
 
@@ -112,7 +112,7 @@ module dag_evolution {
         }
         acc.setBy(auth, s => { ...s, incoming_messages: s.incoming_messages.union(Set(byzblock)) })     
       } else {
-        // parent list dropped, messages potentially corrupted, 0 means correct
+        // parent list not dropped, messages potentially corrupted, 0 means correct
         pure val byzblock = {
           reference: { ...block.reference, index: bad_indexes.get(auth) },
           parents: block.parents
@@ -172,7 +172,7 @@ module dag_evolution {
     }
   }
 
-  val GST = nodes.values().forall(n => n.current_round >= GST_round)
+  val GST = CORRECT_NODES.forall(auth => nodes.get(auth).current_round >= GST_round)
 
   action init = all {
     nodes' = NODES.mapBy(n => {
