@@ -18,8 +18,8 @@ module dag_evolution {
   type DAG = Set[StatementBlock]
 
   pure val FAULTY = 1
-  pure val CORRECT_NODES = Set(0, 1, 2)
-  pure val NODES = CORRECT_NODES.union(Set(3))
+  pure val CORRECT_NODES = Set(2, 3)
+  pure val NODES = CORRECT_NODES.union(Set(0, 1))
 
   type NodeState = {
     authority: int,
@@ -45,7 +45,13 @@ module dag_evolution {
         .filter(b => b.reference.round == b_round - 1)
         .map(b => b.reference)
 
-      block.parents.subseteq(block_references_from_previous_round)
+      and {
+        // "A block is valid if (...) within the sequence of past blocks, there are 2f + 1 blocks
+        // from the previous round r − 1".
+        // For now we only allow blocks in block.parents to be from the previous round r - 1
+        block.parents.size() >= 2 * FAULTY + 1 or b_round == 1,
+        block.parents.subseteq(block_references_from_previous_round)
+      }
     }
   }
 
@@ -92,36 +98,6 @@ module dag_evolution {
     })
   }
 
-  // Sends byzantine messages, potentially dropping messages, links and/or corrupting messages
-  pure def send_byzantine_message(
-    states: int -> NodeState,
-    block: StatementBlock,
-    bad_indexes: int -> int,
-    drops_links: int -> bool,
-    drops_all: int -> bool
-  ): int -> NodeState = {
-    states.keys().fold(states, (acc, auth) => {
-      if (drops_all.get(auth)) {
-        // drop whole message
-        acc        
-      } else if (drops_links.get(auth)) {
-        // parent list dropped, messages potentially corrupted
-        pure val byzblock = {
-          reference: { ...block.reference, index: bad_indexes.get(auth)},
-          parents: Set()
-        }
-        acc.setBy(auth, s => { ...s, incoming_messages: s.incoming_messages.union(Set(byzblock)) })     
-      } else {
-        // parent list not dropped, messages potentially corrupted, 0 means correct
-        pure val byzblock = {
-          reference: { ...block.reference, index: bad_indexes.get(auth) },
-          parents: block.parents
-        }
-        acc.setBy(auth, s => { ...s, incoming_messages: s.incoming_messages.union(Set(byzblock)) })     
-      }
-    })
-  }
-
   /// Whether a node is ready to propose a new block in a new round.
   /// Always true for the first round (zero)
   /// If we reached GST, then we need to check if the DAG is stabilized
@@ -134,26 +110,26 @@ module dag_evolution {
     }
   }
 
-  action new_round(node: NodeState): bool = all {
-    can_go_to_new_round(node),
-    val updated_nodes = nodes.setBy(node.authority, n => { ...n, current_round: node.current_round + 1 })
-    val new_block = {
-        reference: {
-          authority: node.authority,
-          round: node.current_round + 1,
-          index: 0,
-        },
-        parents: node.dag.filter(b => b.reference.round == node.current_round).map(b => b.reference)
-    }
+  action new_round(auth: int): bool = all {
+    pending_nodes == Set(),
+    can_go_to_new_round(nodes.get(auth)),
+    
+    val node = nodes.get(auth)
     all {
-      elect_leaders(new_block.reference.round),
-      if (CORRECT_NODES.contains(node.authority))
-        nodes' = send_correct_message(updated_nodes, new_block)
-      else
-        nondet random = NODES.setOfMaps(Set(0,1,2,3)).oneOf() 
-        nondet drops_links = NODES.setOfMaps(Set(true,false)).oneOf()
-        nondet drops_all = NODES.setOfMaps(Set(true,false)).oneOf()
-        nodes' = send_byzantine_message(updated_nodes, new_block, random, drops_links, drops_all)
+      val updated_nodes = nodes.setBy(node.authority, n => { ...n, current_round: node.current_round + 1 })
+      val new_block = {
+          reference: {
+            authority: node.authority,
+            round: node.current_round + 1,
+            index: 0,
+          },
+          parents: node.dag.filter(b => b.reference.round == node.current_round).map(b => b.reference)
+      }
+      all {
+        elect_leaders(new_block.reference.round),
+        nodes' = send_correct_message(updated_nodes, new_block),
+        GST_round' = GST_round
+      }
     }
   }
 
@@ -194,31 +170,111 @@ module dag_evolution {
 
   val nodes_that_can_go_to_new_round = nodes.values().filter(can_go_to_new_round)
 
-  /// Follow a prioritization order to avoid having low odds to make progress.
-  /// This is important since we require a high number of steps and the simulator
-  /// gives up too easily if actions are not enabled.
-  action step = all {
-    if (pending_nodes != Set()) all {
-      nondet node = pending_nodes.oneOf()
-      if (node.incoming_messages != Set()) {
+
+  action receive_message(auth: int): bool = all {
+    pending_nodes.contains(nodes.get(auth)),
+
+    val node = nodes.get(auth)
+    if (node.incoming_messages != Set()) {
         nondet block = node.incoming_messages.oneOf()
         nodes' = nodes
           .set(node.authority, { ...receive_block(node, block), incoming_messages: node.incoming_messages.exclude(Set(block)) })
       } else {
         nodes' = nodes.setBy(node.authority, n => consume_backlog(n))
       },
-      leader_ranks' = leader_ranks,
-    } else if (nodes_that_can_go_to_new_round != Set()) all {
-      nondet node = nodes_that_can_go_to_new_round.oneOf()
-      new_round(node),
-    } else all {
-      false,
-      nodes' = nodes,
-      leader_ranks' = leader_ranks,
-    },
+    leader_ranks' = leader_ranks,
     GST_round' = GST_round,
+  }
+
+
+  action send_byzantine_block(auth: int, round: int, index: int, dest: int): bool = all {
+    not(CORRECT_NODES.contains(auth)),
+    
+    val node_dest = nodes.get(dest)
+    // We build a block with set of ancestors tailored to the receiving peer's current dag
+    val tailored_block = {
+      reference: {
+          authority: auth,
+          round: round,
+          index: index,
+        },
+        parents: node_dest.dag
+          .filter(b => b.reference.round == round - 1)
+          .map(b => b.reference)
+    }
+    all {
+      tailored_block.parents.size() >= 2 * FAULTY + 1 or tailored_block.reference.round == 1,
+      leader_ranks' = leader_ranks,
+      nodes' = nodes.setBy(dest, s => { ...s, incoming_messages: s.incoming_messages.union(Set(tailored_block))}),
+      GST_round' = GST_round
+    }
+  }
+
+  action step = {
+    nondet authority = NODES.oneOf()
+    nondet round = 1.to(leader_ranks.length()).oneOf()
+    nondet index = NODES.oneOf()
+    nondet dest = NODES.oneOf()
+    any {
+      receive_message(authority),
+      new_round(authority),
+      send_byzantine_block(authority, round, index, dest)
+    }
   }
 
   /// Witness to check if we are progressing often enough
   val witness = nodes.values().forall(n => not(n.dag.exists(b => b.reference.round > 5)))
+
+  // Used for testing. It's a big action that processes all incoming messages at once
+  action receive_all_messages(auth: int): bool = all {
+    pending_nodes.contains(nodes.get(auth)),
+
+    val node = nodes.get(auth)
+    val after_receiving = node.incoming_messages.fold(
+      { ...node, incoming_messages: Set() },
+      (n, block) => receive_block(n, block)
+    )
+    nodes' = nodes.set(node.authority, consume_backlog(after_receiving)),
+    leader_ranks' = leader_ranks,
+    GST_round' = GST_round,
+  }
+
+  run equivocationTest = {
+    init
+      // send_block_byzantine(auth: int, round: int, index: int, dest: int)
+      // Byz node 0 sends equivocating blocks to correct nodes 2 and 3
+      .then(send_byzantine_block(0,1,1,2))
+      .then(send_byzantine_block(0,1,2,3))
+      .then(receive_all_messages(2))
+      .then(receive_all_messages(3))
+      .then(new_round(2))
+      // We need to call receive on all nodes because new_round(2) is a broadcast and the
+      // precondition for new_round(3) is pending_nodes == Set()
+      .then(receive_all_messages(0))
+      .then(receive_all_messages(1))
+      .then(receive_all_messages(2))
+      .then(receive_all_messages(3))
+      .then(new_round(3))
+      .then(receive_all_messages(0))
+      .then(receive_all_messages(1))
+      .then(receive_all_messages(2))
+      .then(receive_all_messages(3))
+      // Byz nodes try the equivocating blocks to be accepted
+      .then(send_byzantine_block(0,2,1,2))
+      .then(send_byzantine_block(0,2,2,3))
+      .then(send_byzantine_block(1,2,1,2))
+      .then(send_byzantine_block(1,2,2,3))
+      .then(receive_all_messages(2))
+      .then(receive_all_messages(3))
+      .then(new_round(2))
+      .then(receive_all_messages(0))
+      .then(receive_all_messages(1))
+      .then(receive_all_messages(2))
+      .then(receive_all_messages(3))
+      .then(new_round(3))
+      .then(receive_all_messages(0))
+      .then(receive_all_messages(1))
+      .then(receive_all_messages(2))
+      .then(receive_all_messages(3))
+  }
 }
