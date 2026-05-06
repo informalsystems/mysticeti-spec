@@ -13,11 +13,11 @@ module mysticeti_types {
   type Edge = (str, str)
   type Log = IncompleteWave | DirectDecision({ certificate_blocks: Set[str], supporting_edges: Set[Edge] }) | IndirectDecision({ anchor: str, edges: Set[Edge] }) | Error | UnableToDecide
 
-  type BlockReference = { authority: int, round: int, label: str, leader_rank: int }
+  type BlockReference = { authority: int, round: int, blockID: int, label: str, leader_rank: int }
   type StatementBlock = { reference: BlockReference, parents: Set[BlockReference] }
 
   // Map from round to validator to block
-  type BlockStore = int -> int -> StatementBlock
+  type BlockStore = int -> int -> Set[StatementBlock]
 
   /* Basic DAG functionality */
 
@@ -37,11 +37,12 @@ module mysticeti_types {
   }
 
   pure def by_reference(blocks: BlockStore, reference: BlockReference): StatementBlock = {
-    blocks.get(reference.round).get(reference.authority)
+    val candidates = blocks.get(reference.round).get(reference.authority)
+    candidates.filter(b => b.reference.blockID == reference.blockID).getOnlyElement()
   }
 
   pure def by_round(blocks: BlockStore, round: int): Set[StatementBlock] = {
-    blocks.getOrElse(round, Map()).values()
+    blocks.getOrElse(round, Map()).values().flatten()
   }
 
   pure def edge(b1: StatementBlock, b2: StatementBlock): Edge = {
@@ -52,13 +53,18 @@ module mysticeti_types {
     blocks.keys().fold(0, max)
   }
   
-  // TODO: Equivocation: we can have multiple blocks from same round/author
-  pure def to_block_store(dag) = {
+  pure def to_block_store(dag: Set[StatementBlock]): BlockStore = {
     dag.fold(Map(), (m, block) => {
       if (m.has(block.reference.round)) {
-        m.setBy(block.reference.round, row => row.put(block.reference.authority, block))
+        m.setBy(block.reference.round, row => {
+          if (row.has(block.reference.authority)) {
+            row.setBy(block.reference.authority, s => s.union(Set(block)))
+          } else {
+            row.put(block.reference.authority, Set(block))
+          }
+        })
       } else {
-        m.put(block.reference.round, Map(block.reference.authority -> block))
+        m.put(block.reference.round, Map(block.reference.authority -> Set(block)))
       }
     })
   }

@@ -163,10 +163,9 @@ module mysticeti_c {
   pure def try_decide_one(
     blocks: BlockStore,
     sequence: List[Decision],
-    round: int,
-    authority: int
+    proposer_block: StatementBlock
   ): List[Decision] = {
-    pure val proposer_block = blocks.get(round).get(authority)
+    pure val round = proposer_block.reference.round
 
     if (round > blocks.highest_round() - 2) {
       // The wave is incomplete, we can not decide
@@ -175,8 +174,8 @@ module mysticeti_c {
           .concat(sequence)
       )
     } else {
-      pure val direct_decision = try_direct_decide(blocks, proposer_block)
-      pure val decision = if (direct_decision.status != Undecided) {
+      pure val direct_decision: Decision = try_direct_decide(blocks, proposer_block)
+      pure val decision: Decision = if (direct_decision.status != Undecided) {
         direct_decision
       } else {
         try_indirect_decide(blocks, sequence, proposer_block)
@@ -188,27 +187,17 @@ module mysticeti_c {
   }
 
   /// Iterate from the highest round to the lowest, and from the last leader (proposer)
-  /// to the first, collecting potential decisions on whether thay should commit or
+  /// to the first, collecting potential decisions on whether they should commit or
   /// skip blocks at that (round, leader).
   pure def try_decide_all(blocks: BlockStore): List[Decision] = {
     // FIXME: we don't have to run all the way to round 0 if there are commited rounds
     decreasingRange(blocks.highest_round(), 0).foldl([], (sequence, round) => {
       decreasingRange(NUM_OF_PROPOSERS - 1, 0).foldl(sequence, (sequence, proposer) => {
         // There can be more than one block for (round, proposer)
+        pure val proposer_blocks: Set[StatementBlock] = blocks.by_round(round)
+                                                              .filter(b => b.reference.leader_rank == proposer)
 
-        // We know the proposer index, but `proposer` refers to the leader rank.
-        // Find the authority for this rank.
-        pure val authority = blocks
-          .getOrElse(round, Map())
-          .values()
-          .find(b => b.reference.leader_rank == proposer)
-
-        match authority {
-           | None => sequence
-           | Some(block) => {
-              try_decide_one(blocks, sequence, block.reference.round, block.reference.authority)
-           }
-         }
+        proposer_blocks.fold(sequence, (seq, block) => try_decide_one(blocks, seq, block))
       })
     })
   }

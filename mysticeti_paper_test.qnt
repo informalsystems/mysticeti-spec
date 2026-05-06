@@ -13,28 +13,28 @@ module mysticeti_paper_test {
   import mysticeti_types.* from "./mysticeti_types"
 
   // The paper labels nodes as L<round><rank> where ranks are "a" < "b" < "c" < "d"
-  pure val L1a = { authority: 0, round: 0, label: "L1a", leader_rank: 0 }
-  pure val L1b = { authority: 1, round: 0, label: "L1b", leader_rank: 1 }
-  pure val L1c = { authority: 2, round: 0, label: "L1c", leader_rank: 2 }
-  pure val L1d = { authority: 3, round: 0, label: "L1d", leader_rank: 3 }
-  pure val L2d = { authority: 0, round: 1, label: "L2d", leader_rank: 3 }
-  pure val L2a = { authority: 1, round: 1, label: "L2a", leader_rank: 0 }
-  pure val L2b = { authority: 2, round: 1, label: "L2b", leader_rank: 1 }
-  pure val L2c = { authority: 3, round: 1, label: "L2c", leader_rank: 2 }
-  pure val L3c = { authority: 0, round: 2, label: "L3c", leader_rank: 2 }
-  pure val L3d = { authority: 1, round: 2, label: "L3d", leader_rank: 3 }
-  pure val L3b = { authority: 3, round: 2, label: "L3b", leader_rank: 1 }
-  pure val L4d = { authority: 0, round: 3, label: "L4d", leader_rank: 3 }
-  pure val L4a = { authority: 1, round: 3, label: "L4a", leader_rank: 0 }
-  pure val L4b = { authority: 2, round: 3, label: "L4b", leader_rank: 1 }
-  pure val L4c = { authority: 3, round: 3, label: "L4c", leader_rank: 2 }
-  pure val L5c = { authority: 0, round: 4, label: "L5c", leader_rank: 2 }
-  pure val L5d = { authority: 1, round: 4, label: "L5d", leader_rank: 3 }
-  pure val L5a = { authority: 2, round: 4, label: "L5a", leader_rank: 0 }
-  pure val L5b = { authority: 3, round: 4, label: "L5b", leader_rank: 1 }
-  pure val L6b = { authority: 0, round: 5, label: "L6b", leader_rank: 1 }
-  pure val L6c = { authority: 1, round: 5, label: "L6c", leader_rank: 2 }
-  pure val L6d = { authority: 2, round: 5, label: "L6d", leader_rank: 3 }
+  pure val L1a = { authority: 0, round: 0, blockID: 0, label: "L1a", leader_rank: 0 }
+  pure val L1b = { authority: 1, round: 0, blockID: 1, label: "L1b", leader_rank: 1 }
+  pure val L1c = { authority: 2, round: 0, blockID: 2, label: "L1c", leader_rank: 2 }
+  pure val L1d = { authority: 3, round: 0, blockID: 3, label: "L1d", leader_rank: 3 }
+  pure val L2d = { authority: 0, round: 1, blockID: 4, label: "L2d", leader_rank: 3 }
+  pure val L2a = { authority: 1, round: 1, blockID: 5, label: "L2a", leader_rank: 0 }
+  pure val L2b = { authority: 2, round: 1, blockID: 6, label: "L2b", leader_rank: 1 }
+  pure val L2c = { authority: 3, round: 1, blockID: 7, label: "L2c", leader_rank: 2 }
+  pure val L3c = { authority: 0, round: 2, blockID: 8, label: "L3c", leader_rank: 2 }
+  pure val L3d = { authority: 1, round: 2, blockID: 9, label: "L3d", leader_rank: 3 }
+  pure val L3b = { authority: 3, round: 2, blockID: 10, label: "L3b", leader_rank: 1 }
+  pure val L4d = { authority: 0, round: 3, blockID: 11, label: "L4d", leader_rank: 3 }
+  pure val L4a = { authority: 1, round: 3, blockID: 12, label: "L4a", leader_rank: 0 }
+  pure val L4b = { authority: 2, round: 3, blockID: 13, label: "L4b", leader_rank: 1 }
+  pure val L4c = { authority: 3, round: 3, blockID: 14, label: "L4c", leader_rank: 2 }
+  pure val L5c = { authority: 0, round: 4, blockID: 15, label: "L5c", leader_rank: 2 }
+  pure val L5d = { authority: 1, round: 4, blockID: 16, label: "L5d", leader_rank: 3 }
+  pure val L5a = { authority: 2, round: 4, blockID: 17, label: "L5a", leader_rank: 0 }
+  pure val L5b = { authority: 3, round: 4, blockID: 18, label: "L5b", leader_rank: 1 }
+  pure val L6b = { authority: 0, round: 5, blockID: 19, label: "L6b", leader_rank: 1 }
+  pure val L6c = { authority: 1, round: 5, blockID: 20, label: "L6c", leader_rank: 2 }
+  pure val L6d = { authority: 2, round: 5, blockID: 21, label: "L6d", leader_rank: 3 }
 
   pure val DAG = Set(
     { reference: L1a, parents: Set() },
@@ -196,19 +196,19 @@ module mysticeti_paper_test {
       nondet a2 = 0.to(NUM_OF_PROPOSERS - 1).exclude(Set(a1)).oneOf()
       nondet r1 = 0.to(NUM_OF_PROPOSERS - 1).oneOf()
       nondet r2 = 0.to(NUM_OF_PROPOSERS - 1).exclude(Set(r1)).oneOf()
-      nondet parents1 = blocks.get(5).values().map(b => b.reference).powerset().oneOf()
-      nondet parents2 = blocks.get(5).values().map(b => b.reference).powerset().oneOf()
-      val block1: StatementBlock = { reference: { round: 6, authority: a1, label: "new1", leader_rank: r1 }, parents: parents1 }
-      val block2: StatementBlock = { reference: { round: 6, authority: a2, label: "new2", leader_rank: r2 }, parents: parents2 }
+      nondet parents1 = blocks.get(5).values().flatten().map(b => b.reference).powerset().oneOf()
+      nondet parents2 = blocks.get(5).values().flatten().map(b => b.reference).powerset().oneOf()
+      val block1: StatementBlock = { reference: { round: 6, authority: a1, blockID: 1, label: "new1", leader_rank: r1 }, parents: parents1 }
+      val block2: StatementBlock = { reference: { round: 6, authority: a2, blockID: 2, label: "new2", leader_rank: r2 }, parents: parents2 }
 
       init_with_dag.then(all {
-        val b1 = blocks.put(6, Map(a1 -> block1))
+        val b1 = blocks.put(6, Map(a1 -> Set(block1)))
         val d1 = commit_order(try_decide_all(b1))
 
-        val b2 = blocks.put(6, Map(a2 -> block2))
+        val b2 = blocks.put(6, Map(a2 -> Set(block2)))
         val d2 = commit_order(try_decide_all(b2))
 
-        val b3 = blocks.put(6, Map(a1 -> block1, a2 -> block2))
+        val b3 = blocks.put(6, Map(a1 -> Set(block1), a2 -> Set(block2)))
         val d3 = commit_order(try_decide_all(b3))
         all {
           assert(d1.isPrefixOf(d3)),

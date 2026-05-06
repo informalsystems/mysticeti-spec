@@ -12,14 +12,14 @@
 module dag_evolution {
   import basicSpells.* from "./spells/basicSpells"
 
-  type BlockReference = { authority: int, round: int, index: int }
+  type BlockReference = { authority: int, round: int, blockID: int }
   type StatementBlock = { reference: BlockReference, parents: Set[BlockReference] }
 
   type DAG = Set[StatementBlock]
 
   pure val FAULTY = 1
-  pure val CORRECT_NODES = Set(2, 3)
-  pure val NODES = CORRECT_NODES.union(Set(0, 1))
+  pure val CORRECT_NODES = Set(2,3)
+  pure val NODES = CORRECT_NODES.union(Set(0,1))
 
   type NodeState = {
     authority: int,
@@ -30,10 +30,12 @@ module dag_evolution {
   }
 
   var nodes: int -> NodeState
-  /// A map from each authority to its leader rank, for every round (roud = list index)
+  /// A map from each authority to its leader rank, for every round (round = list index)
   var leader_ranks: List[int -> int]
   /// The round at which we reach Global Stabilization Time (GST)
   var GST_round: int
+  /// The next available blockID
+  var next_blockID: int
 
   /// A node will only add a block to its DAG if all its parents are in the DAG already
   pure def can_add(dag: DAG, block: StatementBlock): bool = {
@@ -44,7 +46,6 @@ module dag_evolution {
       pure val block_references_from_previous_round = dag
         .filter(b => b.reference.round == b_round - 1)
         .map(b => b.reference)
-
       and {
         // "A block is valid if (...) within the sequence of past blocks, there are 2f + 1 blocks
         // from the previous round r − 1".
@@ -121,14 +122,15 @@ module dag_evolution {
           reference: {
             authority: node.authority,
             round: node.current_round + 1,
-            index: 0,
+            blockID: next_blockID,
           },
           parents: node.dag.filter(b => b.reference.round == node.current_round).map(b => b.reference)
       }
       all {
         elect_leaders(new_block.reference.round),
         nodes' = send_correct_message(updated_nodes, new_block),
-        GST_round' = GST_round
+        GST_round' = GST_round,
+        next_blockID' = next_blockID + 1
       }
     }
   }
@@ -136,7 +138,7 @@ module dag_evolution {
   /// A set of possible leader ranks for a round. That is, a maping from authorities to ranks,
   /// where all ranks are different
   pure val possible_leader_ranks =
-    NODES.setOfMaps(0.to(NODES.size())).filter(m => m.values().size() == NODES.size())
+    NODES.setOfMaps(0.to(NODES.size()-1)).filter(m => m.values().size() == NODES.size())
 
   action elect_leaders(round) = {
     if (round > leader_ranks.length()) {
@@ -162,6 +164,7 @@ module dag_evolution {
     leader_ranks' = [leader_ranks_0],
     nondet round_GST = 1.to(5).oneOf()
     GST_round' = round_GST,
+    next_blockID' = 0
   }
 
   val pending_nodes = nodes.values().filter(node => {
@@ -184,10 +187,11 @@ module dag_evolution {
       },
     leader_ranks' = leader_ranks,
     GST_round' = GST_round,
+    next_blockID' = next_blockID
   }
 
 
-  action send_byzantine_block(auth: int, round: int, index: int, dest: int): bool = all {
+  action send_byzantine_block(auth: int, round: int, dest: int): bool = all {
     not(CORRECT_NODES.contains(auth)),
     
     val node_dest = nodes.get(dest)
@@ -196,36 +200,21 @@ module dag_evolution {
       reference: {
           authority: auth,
           round: round,
-          index: index,
+          blockID: next_blockID,
         },
         parents: node_dest.dag
           .filter(b => b.reference.round == round - 1)
-          .map(b => b.reference)
+          .map(b => b.reference),
     }
     all {
       tailored_block.parents.size() >= 2 * FAULTY + 1 or tailored_block.reference.round == 1,
       leader_ranks' = leader_ranks,
       nodes' = nodes.setBy(dest, s => { ...s, incoming_messages: s.incoming_messages.union(Set(tailored_block))}),
-      GST_round' = GST_round
+      GST_round' = GST_round,
+      next_blockID' = next_blockID + 1
     }
   }
 
-  action step = {
-    nondet authority = NODES.oneOf()
-    nondet round = 1.to(leader_ranks.length()).oneOf()
-    nondet index = NODES.oneOf()
-    nondet dest = NODES.oneOf()
-    any {
-      receive_message(authority),
-      new_round(authority),
-      send_byzantine_block(authority, round, index, dest)
-    }
-  }
-
-  /// Witness to check if we are progressing often enough
-  val witness = nodes.values().forall(n => not(n.dag.exists(b => b.reference.round > 5)))
-
-  // Used for testing. It's a big action that processes all incoming messages at once
   action receive_all_messages(auth: int): bool = all {
     pending_nodes.contains(nodes.get(auth)),
 
@@ -237,44 +226,70 @@ module dag_evolution {
     nodes' = nodes.set(node.authority, consume_backlog(after_receiving)),
     leader_ranks' = leader_ranks,
     GST_round' = GST_round,
+    next_blockID' = next_blockID
   }
 
-  run equivocationTest = {
-    init
-      // send_block_byzantine(auth: int, round: int, index: int, dest: int)
-      // Byz node 0 sends equivocating blocks to correct nodes 2 and 3
-      .then(send_byzantine_block(0,1,1,2))
-      .then(send_byzantine_block(0,1,2,3))
-      .then(receive_all_messages(2))
-      .then(receive_all_messages(3))
-      .then(new_round(2))
-      // We need to call receive on all nodes because new_round(2) is a broadcast and the
-      // precondition for new_round(3) is pending_nodes == Set()
-      .then(receive_all_messages(0))
-      .then(receive_all_messages(1))
-      .then(receive_all_messages(2))
-      .then(receive_all_messages(3))
-      .then(new_round(3))
-      .then(receive_all_messages(0))
-      .then(receive_all_messages(1))
-      .then(receive_all_messages(2))
-      .then(receive_all_messages(3))
-      // Byz nodes try the equivocating blocks to be accepted
-      .then(send_byzantine_block(0,2,1,2))
-      .then(send_byzantine_block(0,2,2,3))
-      .then(send_byzantine_block(1,2,1,2))
-      .then(send_byzantine_block(1,2,2,3))
-      .then(receive_all_messages(2))
-      .then(receive_all_messages(3))
-      .then(new_round(2))
-      .then(receive_all_messages(0))
-      .then(receive_all_messages(1))
-      .then(receive_all_messages(2))
-      .then(receive_all_messages(3))
-      .then(new_round(3))
-      .then(receive_all_messages(0))
-      .then(receive_all_messages(1))
-      .then(receive_all_messages(2))
-      .then(receive_all_messages(3))
+  action all_nodes_receive_all_messages: bool = all {
+    pending_nodes != Set(),                                                     
+    nodes' = nodes.transformValues(node => {
+      val after_receiving = node.incoming_messages.fold(                        
+        { ...node, incoming_messages: Set() },                                
+        (n, block) => receive_block(n, block)                                   
+      )                                                                       
+      consume_backlog(after_receiving)
+    }),                                                                         
+    leader_ranks' = leader_ranks,
+    GST_round' = GST_round,                                                     
+    next_blockID' = next_blockID                                              
   }
+
+  action init_no_GST = all {
+    nodes' = NODES.mapBy(n => {
+      authority: n,
+      dag: Set(),
+      backlog: Set(),
+      current_round: 0,
+      incoming_messages: Set()
+    }),
+    nondet leader_ranks_0 = possible_leader_ranks.oneOf()
+    leader_ranks' = [leader_ranks_0],
+    GST_round' = 1,
+    next_blockID' = 0
+  }
+
+  action micro_step = {
+    nondet authority = NODES.oneOf()
+    nondet round = 1.to(leader_ranks.length()).oneOf()
+    nondet dest = NODES.oneOf()
+    any {
+      receive_message(authority),
+      new_round(authority),
+      send_byzantine_block(authority, round, dest)
+    }
+  }
+
+  action short_step = {
+    nondet authority = NODES.oneOf()
+    nondet round = 1.to(leader_ranks.length()).oneOf()
+    nondet dest = NODES.oneOf()
+    any {
+      receive_all_messages(authority),
+      new_round(authority),
+      send_byzantine_block(authority, round, dest)
+    }
+  }
+
+  action step = {
+    nondet authority = NODES.oneOf()
+    nondet round = 1.to(leader_ranks.length()).oneOf()
+    nondet dest = NODES.oneOf()
+    any {
+      all_nodes_receive_all_messages,
+      new_round(authority),
+      send_byzantine_block(authority, round, dest)
+    }
+  }
+
+  /// Witness to check if we are progressing often enough
+  val witness = nodes.values().forall(n => not(n.dag.exists(b => b.reference.round > 5)))
 }

@@ -14,14 +14,14 @@ module main {
   import mysticeti_types.to_block_store from "mysticeti_c"
 
   /// Function to convert a reference from the dag_evolution format to the mysticeti_c format
-  /// by dropping the "index" and adding a "label"
+  /// by adding "label" and "blockID"
   def convert_reference(b) = {
       {
         authority: b.authority,
         round: b.round,
         label: "Generated",
         leader_rank: leader_ranks[b.round - 1].get(b.authority),
-        // we might need to add the index when we have equivocation
+        blockID: b.blockID
       }
   }
 
@@ -45,6 +45,53 @@ module main {
     tuples(orders, orders).forall(((order1, order2)) => {
       order1.length() <= order2.length() implies order1.isPrefixOf(order2)
     })
+  }
+
+  run equivocationTest = {
+    init_no_GST
+      // send_block_byzantine(auth: int, round: int, index: int, dest: int)
+      // Honest nodes 2 and 3 participate in round 1.
+      .then(new_round(2))
+      .then(all_nodes_receive_all_messages)
+      .then(new_round(3))
+      // Byz node 0 sends equivocating blocks to correct nodes 2 and 3
+      // Signature: send_byzantine_block(auth: int, round: int, dest: int)
+      .then(all_nodes_receive_all_messages)
+      .then(send_byzantine_block(0,1,2))
+      .then(receive_all_messages(2))
+      .then(send_byzantine_block(0,1,3))
+      // Honest nodes move on to round 2
+      // We need to call receive on all nodes because new_round(x) is a broadcast and the
+      // precondition for new_round(x) is pending_nodes == Set()
+      .then(all_nodes_receive_all_messages)
+      .then(new_round(2))
+      .then(all_nodes_receive_all_messages)
+      .then(new_round(3))
+      .then(all_nodes_receive_all_messages)
+      // Byz nodes try the equivocating blocks to be accepted sending supporting nodes at round 2
+      .then(send_byzantine_block(0,2,2))
+      .then(all_nodes_receive_all_messages)
+      .then(send_byzantine_block(0,2,3))
+      .then(all_nodes_receive_all_messages)
+      .then(send_byzantine_block(1,2,2))
+      .then(all_nodes_receive_all_messages)
+      .then(send_byzantine_block(1,2,3))
+      .then(all_nodes_receive_all_messages)
+      // Honest nodes move on to round 3
+      .then(new_round(2))
+      .then(all_nodes_receive_all_messages)
+      .then(new_round(3))
+      .then(all_nodes_receive_all_messages)
+      // Byz nodes forge the certificates needed for deciding at round 1 by sending tailored blocks for round 3.
+      .then(send_byzantine_block(0,3,2))
+      .then(all_nodes_receive_all_messages)
+      .then(send_byzantine_block(0,3,3))
+      .then(all_nodes_receive_all_messages)
+      .then(send_byzantine_block(1,3,2))
+      .then(all_nodes_receive_all_messages)
+      .then(send_byzantine_block(1,3,3))
+      .then(all_nodes_receive_all_messages)
+      .expect(not(inv))
   }
 }
 
