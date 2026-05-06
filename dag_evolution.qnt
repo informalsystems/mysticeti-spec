@@ -49,9 +49,9 @@ module dag_evolution {
     }
   }
 
-  /// Whether a block has received a sufficient number of blocks for a round.
-  /// Since we need 2F + 1 supporters on the consensus algorithm, the block needs to have
-  /// least that number of blocks to start processing a new round.
+  /// Whether a node has received a sufficient number of blocks for a round.
+  /// Since we need 2F + 1 supporters on the consensus algorithm, the nodes needs to have
+  /// at least that number of blocks to start processing a new round.
   pure def has_enough_blocks(dag: DAG, round: int): bool = {
     dag.filter(b => b.reference.round == round).size() >= 2 * FAULTY + 1
   }
@@ -160,7 +160,7 @@ module dag_evolution {
   /// A set of possible leader ranks for a round. That is, a maping from authorities to ranks,
   /// where all ranks are different
   pure val possible_leader_ranks =
-    NODES.setOfMaps(0.to(NODES.size())).filter(m => m.values().size() == NODES.size())
+    NODES.setOfMaps(0.to(NODES.size() - 1)).filter(m => m.values().size() == NODES.size())
 
   action elect_leaders(round) = {
     if (round > leader_ranks.length()) {
