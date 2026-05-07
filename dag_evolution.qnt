@@ -50,7 +50,7 @@ module dag_evolution {
         // "A block is valid if (...) within the sequence of past blocks, there are 2f + 1 blocks
         // from the previous round r − 1".
         // For now we only allow blocks in block.parents to be from the previous round r - 1
-        block.parents.size() >= 2 * FAULTY + 1 or b_round == 1,
+        block.parents.map(p => p.authority).size() >= 2 * FAULTY + 1 or b_round == 1,
         block.parents.subseteq(block_references_from_previous_round)
       }
     }
@@ -60,7 +60,7 @@ module dag_evolution {
   /// Since we need 2F + 1 supporters on the consensus algorithm, the block needs to have
   /// least that number of blocks to start processing a new round.
   pure def has_enough_blocks(dag: DAG, round: int): bool = {
-    dag.filter(b => b.reference.round == round).size() >= 2 * FAULTY + 1
+    dag.filter(b => b.reference.round == round).map(b => b.reference.authority).size() >= 2 * FAULTY + 1
   }
 
   /// All correct nodes have a block for this round in the DAG
@@ -207,7 +207,7 @@ module dag_evolution {
           .map(b => b.reference),
     }
     all {
-      tailored_block.parents.size() >= 2 * FAULTY + 1 or tailored_block.reference.round == 1,
+      tailored_block.parents.map(p => p.authority).size() >= 2 * FAULTY + 1 or tailored_block.reference.round == 1,
       leader_ranks' = leader_ranks,
       nodes' = nodes.setBy(dest, s => { ...s, incoming_messages: s.incoming_messages.union(Set(tailored_block))}),
       GST_round' = GST_round,
@@ -253,7 +253,7 @@ module dag_evolution {
     }),
     nondet leader_ranks_0 = possible_leader_ranks.oneOf()
     leader_ranks' = [leader_ranks_0],
-    GST_round' = 1,
+    GST_round' = 1000,
     next_blockID' = 0
   }
 

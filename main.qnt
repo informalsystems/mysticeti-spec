@@ -48,8 +48,12 @@ module main {
   }
 
   run equivocationTest = {
+  // This test passes for the following configuration:
+  //  pure val FAULTY = 1
+  //  pure val CORRECT_NODES = Set(2,3)
+  //  pure val NODES = CORRECT_NODES.union(Set(0,1))
+
     init_no_GST
-      // send_block_byzantine(auth: int, round: int, index: int, dest: int)
       // Honest nodes 2 and 3 participate in round 1.
       .then(new_round(2))
       .then(all_nodes_receive_all_messages)

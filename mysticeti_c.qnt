@@ -30,7 +30,8 @@ module mysticeti_c {
       not(block.parents.exists(parent => parent == proposal.reference))
     })
 
-    non_supporters.size() >= 2 * FAULTY + 1
+    non_supporters.map(b => b.reference.authority).size() >= 2 * FAULTY + 1
+
   }
 
   /// The anchor has a certified link with a proposer block iff it
@@ -50,7 +51,7 @@ module mysticeti_c {
     })
   }
 
-  /// A certificate should have at least 2F + 1 parents that support (link to) the proposer block.
+  /// A certificate should have at least 2F + 1 parents from different authors that support (link to) the proposer block.
   pure def is_certificate(
     blocks: BlockStore,
     certificate_block: StatementBlock,
@@ -60,7 +61,7 @@ module mysticeti_c {
       blocks.by_reference(b).parents.contains(proposer_block.reference)
     })
 
-    parents_supporting_proposer.size() >= 2*FAULTY + 1
+    parents_supporting_proposer.map(b => b.authority).size() >= 2*FAULTY + 1
   }
 
   // The certificate pattern, illustrated by Figure 3 (right), where at least 2f + 1 blocks
@@ -85,7 +86,7 @@ module mysticeti_c {
     
     pure val status = if (should_skip(blocks, proposer_block)) {
       Skip
-    } else if (certificates.size() >= 2*FAULTY + 1) {
+    } else if (certificates.map(c => c.reference.authority).size() >= 2*FAULTY + 1) {
       Commit
     } else {
       // "If the direct decision rule fails to mark a slot as either
