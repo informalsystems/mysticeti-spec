@@ -152,21 +152,6 @@ module dag_evolution {
 
   val GST = CORRECT_NODES.forall(auth => nodes.get(auth).current_round >= GST_round)
 
-  action init = all {
-    nodes' = NODES.mapBy(n => {
-      authority: n,
-      dag: Set(),
-      backlog: Set(),
-      current_round: 0,
-      incoming_messages: Set()
-    }),
-    nondet leader_ranks_0 = possible_leader_ranks.oneOf()
-    leader_ranks' = [leader_ranks_0],
-    nondet round_GST = 1.to(5).oneOf()
-    GST_round' = round_GST,
-    next_blockID' = 0
-  }
-
   val pending_nodes = nodes.values().filter(node => {
     node.incoming_messages != Set() or (node.backlog != Set() and consume_backlog(node) != node)
   })
@@ -257,6 +242,22 @@ module dag_evolution {
     next_blockID' = 0
   }
 
+    action init = all {
+    nodes' = NODES.mapBy(n => {
+      authority: n,
+      dag: Set(),
+      backlog: Set(),
+      current_round: 0,
+      incoming_messages: Set()
+    }),
+    nondet leader_ranks_0 = possible_leader_ranks.oneOf()
+    leader_ranks' = [leader_ranks_0],
+    nondet round_GST = 1.to(5).oneOf()
+    GST_round' = round_GST,
+    next_blockID' = 0
+  }
+
+  // 1 (nondet) authority can receive 1 (nondet) incoming message
   action micro_step = {
     nondet authority = NODES.oneOf()
     nondet round = 1.to(leader_ranks.length()).oneOf()
@@ -268,6 +269,7 @@ module dag_evolution {
     }
   }
 
+  // 1 (nondet) authority can receive all of its incoming messages
   action short_step = {
     nondet authority = NODES.oneOf()
     nondet round = 1.to(leader_ranks.length()).oneOf()
@@ -279,6 +281,7 @@ module dag_evolution {
     }
   }
 
+  // All authorities receive all of their incoming messages
   action step = {
     nondet authority = NODES.oneOf()
     nondet round = 1.to(leader_ranks.length()).oneOf()
