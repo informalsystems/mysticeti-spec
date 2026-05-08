@@ -176,6 +176,8 @@ module dag_evolution {
   }
 
 
+  /// Sends a valid block with new blockID to the destination. When called multiple times for the same 
+  /// auth and round blocks with different blockID are set, i.e., node auth equivocates.
   action send_byzantine_block(auth: int, round: int, dest: int): bool = all {
     not(CORRECT_NODES.contains(auth)),
     
