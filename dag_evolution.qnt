@@ -202,6 +202,7 @@ module dag_evolution {
     }
   }
 
+ /// An acceleration of receive_message that allows to do many receptions in one step.
   action receive_all_messages(auth: int): bool = all {
     pending_nodes.contains(nodes.get(auth)),
 
@@ -260,7 +261,7 @@ module dag_evolution {
   }
 
   // 1 (nondet) authority can receive 1 (nondet) incoming message
-  action micro_step = {
+  action step = {
     nondet authority = NODES.oneOf()
     nondet round = 1.to(leader_ranks.length()).oneOf()
     nondet dest = NODES.oneOf()
@@ -272,7 +273,7 @@ module dag_evolution {
   }
 
   // 1 (nondet) authority can receive all of its incoming messages
-  action short_step = {
+  action accelerated_step = {
     nondet authority = NODES.oneOf()
     nondet round = 1.to(leader_ranks.length()).oneOf()
     nondet dest = NODES.oneOf()
@@ -284,7 +285,7 @@ module dag_evolution {
   }
 
   // All authorities receive all of their incoming messages
-  action step = {
+  action greedy_step = {
     nondet authority = NODES.oneOf()
     nondet round = 1.to(leader_ranks.length()).oneOf()
     nondet dest = NODES.oneOf()

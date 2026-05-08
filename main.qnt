@@ -53,49 +53,76 @@ module main {
   //  pure val CORRECT_NODES = Set(2,3)
   //  pure val NODES = CORRECT_NODES.union(Set(0,1))
 
+    val byz_1 = 0
+    val byz_2 = 1
+    val corr_1 = 2
+    val corr_2 = 3
+
     init_no_GST
-      // Honest nodes 2 and 3 participate in round 1.
-      .then(new_round(2))
+      // Correct nodes participate in round 1.
+      .then(new_round(corr_1))
       .then(all_nodes_receive_all_messages)
-      .then(new_round(3))
+      .then(new_round(corr_2))
+      .then(all_nodes_receive_all_messages)
+      // All correct nodes should be in round 1
+      .expect(CORRECT_NODES.forall(n => nodes.get(n).current_round == 1))
       // Byz node 0 sends equivocating blocks to correct nodes 2 and 3
       // Signature: send_byzantine_block(auth: int, round: int, dest: int)
-      .then(all_nodes_receive_all_messages)
-      .then(send_byzantine_block(0,1,2))
-      .then(receive_all_messages(2))
-      .then(send_byzantine_block(0,1,3))
+      .then(send_byzantine_block(byz_1,1,corr_1))
+      .then(receive_all_messages(corr_1))
+      .then(send_byzantine_block(byz_1,1,corr_2))
+      // byz_1 equivocated: corr_1 and corr_2 have different blocks from byz_1 at round 1                                                                   
+      .expect({
+          val byz_block_1 = nodes.get(corr_1).dag.filter(b => b.reference.authority == byz_1 and b.reference.round == 1)
+          val byz_block_2 = nodes.get(corr_2).dag.filter(b => b.reference.authority == byz_1 and b.reference.round == 1)                    
+          byz_block_1 != byz_block_2
+        })
       // Honest nodes move on to round 2
       // We need to call receive on all nodes because new_round(x) is a broadcast and the
       // precondition for new_round(x) is pending_nodes == Set()
       .then(all_nodes_receive_all_messages)
-      .then(new_round(2))
+      .then(new_round(corr_1))
       .then(all_nodes_receive_all_messages)
-      .then(new_round(3))
+      .then(new_round(corr_2))
       .then(all_nodes_receive_all_messages)
+      // All correct nodes should be in round 2
+      .expect(CORRECT_NODES.forall(n => nodes.get(n).current_round == 2))
       // Byz nodes try the equivocating blocks to be accepted sending supporting nodes at round 2
-      .then(send_byzantine_block(0,2,2))
+      .then(send_byzantine_block(byz_1,2,corr_1))
       .then(all_nodes_receive_all_messages)
-      .then(send_byzantine_block(0,2,3))
+      .then(send_byzantine_block(byz_1,2,corr_2))
       .then(all_nodes_receive_all_messages)
-      .then(send_byzantine_block(1,2,2))
+      .then(send_byzantine_block(byz_2,2,corr_1))
       .then(all_nodes_receive_all_messages)
-      .then(send_byzantine_block(1,2,3))
+      .then(send_byzantine_block(byz_2,2,corr_2))
       .then(all_nodes_receive_all_messages)
       // Honest nodes move on to round 3
-      .then(new_round(2))
+      .then(new_round(corr_1))
       .then(all_nodes_receive_all_messages)
-      .then(new_round(3))
+      .then(new_round(corr_2))
       .then(all_nodes_receive_all_messages)
+      // All correct nodes should be in round 3
+      .expect(CORRECT_NODES.forall(n => nodes.get(n).current_round == 3))
       // Byz nodes forge the certificates needed for deciding at round 1 by sending tailored blocks for round 3.
-      .then(send_byzantine_block(0,3,2))
+      .then(send_byzantine_block(byz_1,3,corr_1))
       .then(all_nodes_receive_all_messages)
-      .then(send_byzantine_block(0,3,3))
+      .then(send_byzantine_block(byz_1,3,corr_2))
       .then(all_nodes_receive_all_messages)
-      .then(send_byzantine_block(1,3,2))
+      .then(send_byzantine_block(byz_2,3,corr_1))
       .then(all_nodes_receive_all_messages)
-      .then(send_byzantine_block(1,3,3))
+      .then(send_byzantine_block(byz_2,3,corr_2))
       .then(all_nodes_receive_all_messages)
+      // The safety invariant does not hold
       .expect(not(inv))
+      // In particular, correct nodes committed different blocks
+      .expect({
+        val commit_list_corr1: List[BlockReference] = mysticeti_c::commit_order(mysticeti_c::try_decide_all(dags_for_consensus.get(corr_1).to_block_store()))
+        val commit_list_corr2: List[BlockReference] = mysticeti_c::commit_order(mysticeti_c::try_decide_all(dags_for_consensus.get(corr_2).to_block_store()))
+
+        val committed_block_1 = commit_list_corr1.select(b => b.authority == byz_1 and b.round == 1)
+        val committed_block_2 = commit_list_corr2.select(b => b.authority == byz_1 and b.round == 1)
+
+        committed_block_1 != committed_block_2
+      })
   }
 }
-
