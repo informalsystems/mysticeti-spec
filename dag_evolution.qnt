@@ -176,8 +176,9 @@ module dag_evolution {
   }
 
 
-  /// Sends a valid block with new blockID to the destination. When called multiple times for the same 
-  /// auth and round blocks with different blockID are set, i.e., node auth equivocates.
+  /// The byzantine author sends a valid, tailored block based on destination current state.
+  /// This guarantees the block will be accepted, but disallows the possibility of a byzantine
+  /// node sending the same block towards two different destinations.
   action send_byzantine_block(auth: int, round: int, dest: int): bool = all {
     not(CORRECT_NODES.contains(auth)),
     
@@ -260,7 +261,7 @@ module dag_evolution {
     next_blockID' = 0
   }
 
-  // 1 (nondet) authority can receive 1 (nondet) incoming message
+  // One (nondet) authority can receive one (nondet) incoming message
   action step = {
     nondet authority = NODES.oneOf()
     nondet round = 1.to(leader_ranks.length()).oneOf()
@@ -272,7 +273,7 @@ module dag_evolution {
     }
   }
 
-  // 1 (nondet) authority can receive all of its incoming messages
+  // One (nondet) authority can receive all of its incoming messages
   action accelerated_step = {
     nondet authority = NODES.oneOf()
     nondet round = 1.to(leader_ranks.length()).oneOf()
